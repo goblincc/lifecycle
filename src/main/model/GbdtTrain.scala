@@ -2,23 +2,28 @@ package model
 
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.GBTClassifier
-import org.apache.spark.ml.feature.{IndexToString, StringIndexer, VectorIndexer}
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.ml.feature._
+import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import utils.TimeUtils
 
 object GbdtTrain {
   def main(args: Array[String]): Unit = {
     val dt = args(0)
     val dt1 = TimeUtils.changFormat(dt)
+    val dt2 = TimeUtils.addDate(dt, 1)
     val dt7 = TimeUtils.addDate(dt, 7)
     val sparkSession = SparkSession.builder().enableHiveSupport().getOrCreate()
+    sparkSession.sparkContext.setLogLevel("warn")
+    val map = getBizMap(sparkSession, dt1)
+    registUDF(sparkSession,map)
 
-    val sqltext =
+    val sqlText =
       s"""
          |select
-         | hdid ,
+         | a.hdid ,
          |  if(sex is null or sex == 2, 1, sex) as sex ,
-         |	nvl(bd_consum,'other') as bd_consum ,
+         |	nvl(bd_consum ,'other') as bd_consum ,
          |	nvl(bd_marriage , 'other') as bd_marriage,
          |	nvl(bd_subconsum , 'other') as bd_subconsum,
          |	nvl(sys, 2) as sys,
@@ -45,7 +50,7 @@ object GbdtTrain {
          |	avg_watch_dr_d7 ,
          |	avg_watch_dr_d14 ,
          |	avg_watch_dr_d30 ,
-         |	biz_watch_top5_d30 ,
+         |	to_vector(nvl(biz_watch_top5_d30, "")) as  biz_watch_top5_d30,
          |	search_cnt_d1 ,
          |	search_cnt_d3 ,
          |	search_cnt_d7 ,
@@ -99,27 +104,48 @@ object GbdtTrain {
          |if(b.hdid is null, 0, 1) as label from (
          |select * from persona.yylive_dws_user_feature where dt = '${dt1}' and active_days_d30 >= 2) as a
          |left join (
-         |select hdid from persona.yylive_ods_idinfo_day where dt = '${dt7}' group by hdid) as b on a.hdid = b.hdid
-         |left join (select hdid from persona.yylive_dws_metrics_install_total  WHERE dt="2021-05-07" and dt = '${dt1}') as c
+         |select hdid from persona.yylive_ods_idinfo_day where dt >= '${dt2}' and dt <= '${dt7}' group by hdid) as b on a.hdid = b.hdid
+         |left join (select hdid from persona.yylive_dws_metrics_install_total  WHERE dt="2021-05-07" and install_dt = '${dt1}') as c
          | on a.hdid = c.hdid where c.hdid is null
        """.stripMargin
 
-    val data = sparkSession.sql(sqltext)
+    val datas = sparkSession.sql(sqlText)
+     datas.show(5, false)
 
-
+    val data = sampleData(datas)
 
     val labelIndexer = new StringIndexer()
       .setInputCol("label")
       .setOutputCol("indexedLabel")
-      .fit(data)
 
-    // Automatically identify categorical features, and index them.
-    // Set maxCategories so features with > 4 distinct values are treated as continuous.
-    val featureIndexer = new VectorIndexer()
-      .setInputCol("features")
-      .setOutputCol("indexedFeatures")
-      .setMaxCategories(4)
-      .fit(data)
+    val bd_consum_indexer = new StringIndexer()
+      .setInputCol("bd_consum")
+      .setOutputCol("bd_consum_index")
+
+    val bd_consum_encoder = new OneHotEncoder()
+      .setInputCol("bd_consum_index")
+      .setOutputCol("bd_consumVec")
+
+    val sysIndexer = new StringIndexer()
+      .setInputCol("sys")
+      .setOutputCol("indexedSys")
+
+    val featureArray = Array("bd_consumVec","start_cnt_d1","start_cnt_d3","start_cnt_d7","start_cnt_d14","start_cnt_d30",
+      "start_period_d7", "start_period_d14","start_period_d30", "active_days_d1", "active_days_d3", "active_days_d7", "active_days_d14",
+      "active_days_d14","active_days_d30","total_watch_dr_d1", "total_watch_dr_d3", "total_watch_dr_d7","total_watch_dr_d14","total_watch_dr_d30",
+      "avg_watch_dr_d1", "avg_watch_dr_d3", "avg_watch_dr_d7", "avg_watch_dr_d14","avg_watch_dr_d30", "search_cnt_d1", "search_cnt_d3", "search_cnt_d7",
+      "search_cnt_d14", "search_cnt_d30", "consume_cnt_d1", "consume_cnt_d3", "consume_cnt_d7","consume_cnt_d14","consume_cnt_d30","channel_msg_cnt_d1",
+      "channel_msg_cnt_d3","channel_msg_cnt_d7","channel_msg_cnt_d14","channel_msg_cnt_d30","consume_money_d1","consume_money_d3", "consume_money_d7",
+      "consume_money_d14","consume_money_d30","cancel_cnt_d1","cancel_cnt_d3","cancel_cnt_d7","cancel_cnt_d14","cancel_cnt_d30","subscribe_cnt_d1",
+      "subscribe_cnt_d3","subscribe_cnt_d7","subscribe_cnt_d14","subscribe_cnt_d30","exposure_cnt_d1","exposure_cnt_d3","exposure_cnt_d7","exposure_cnt_d14",
+      "exposure_cnt_d30","click_cnt_d1","click_cnt_d3","click_cnt_d7","click_cnt_d14","click_cnt_d30", "push_click_cnt_d1", "push_click_cnt_d1","push_click_cnt_d3",
+      "push_click_cnt_d7","push_click_cnt_d14","push_click_cnt_d30", "push_click_day_d1", "push_click_day_d3", "push_click_day_d7","push_click_day_d14","push_click_day_d30"
+    )
+
+
+    val assembler = new VectorAssembler()
+      .setInputCols(featureArray)
+      .setOutputCol("features")
 
     // Split the data into training and test sets (30% held out for testing).
     val Array(trainingData, testData) = data.randomSplit(Array(0.7, 0.3))
@@ -127,25 +153,96 @@ object GbdtTrain {
     // Train a GBT model.
     val gbt = new GBTClassifier()
       .setLabelCol("indexedLabel")
-      .setFeaturesCol("indexedFeatures")
+      .setFeaturesCol("features")
       .setMaxIter(10)
-
 
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
       .setOutputCol("predictedLabel")
 
-
     // Chain indexers and GBT in a Pipeline.
     val pipeline = new Pipeline()
-      .setStages(Array(labelIndexer, featureIndexer, gbt, labelConverter))
+      .setStages(Array(labelIndexer, bd_consum_indexer,bd_consum_encoder, assembler, gbt, labelConverter))
 
     // Train model. This also runs the indexers.
     val model = pipeline.fit(trainingData)
 
     // Make predictions.
-    val predictions = model.transform(testData)
+    val predictions = model.transform(trainingData)
+    predictions.show(10, false)
+
+    val train_out = predictions.select("indexedLabel", "prediction")
+
+    train_out.createOrReplaceTempView("gbdt_trained")
+    /*val trained_matrix = sparkSession.sql(
+      s"""
+        select
+            'trained data' as type
+            ,predict_cnt
+            ,(TP + FN) as real_loss_cnt
+            ,(TP + FP) as predict_loss_cnt
+            ,(TP + TN)/ predict_cnt as accuarcy
+            ,TP/(TP + FP) as precise
+            ,TP/(TP + FN) as recall
+            ,TP
+            ,FP
+            ,TN
+            ,FN
+        from (
+            select
+                count(1) as predict_cnt
+                ,count(if(indexedLabel = 1.0 and prediction= 1.0, 1, null)) as TP
+                ,count(if(indexedLabel = 0.0 and prediction= 1.0, 1, null)) as FP
+                ,count(if(indexedLabel = 0.0 and prediction= 0.0, 1, null)) as TN
+                ,count(if(indexedLabel = 1.0 and prediction= 0.0, 1, null)) as FN
+            from gbdt_trained
+        )b
+        """*/
+    sparkSession.close()
 
   }
+
+  def sampleData(data: DataFrame): DataFrame ={
+    val pos_data = data.where("label = 1")
+    val neg_data = data.where("label = 0")
+    val ratio = pos_data.count()/neg_data.count()
+    println("pos_data", pos_data.count())
+    println("neg_data", neg_data.count())
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 3))
+    dataFrame
+  }
+
+  def registUDF(sparkSession: SparkSession, map: collection.Map[String, Long]): Unit ={
+    sparkSession.udf.register("to_vector", (s: String) =>{
+      val bizs: Array[String] = s.split(",")
+      val index = new Array[Int](bizs.length)
+      val index2 = new Array[Double](bizs.length)
+      if(bizs(0).trim().nonEmpty){
+        for (i <- bizs.indices) {
+          val l: Long = map.getOrElse(bizs(i), 0)
+          index(i) = l.toInt
+          index2(i) = 1.0
+        }
+      }else{
+        for(i <- 0 until map.size){
+          index(i) = i
+          index2(i) = 0.0
+        }
+      }
+      Vectors.sparse(map.size, index.sortWith(_<_), index2)
+    })
+  }
+
+  def getBizMap(sparkSession: SparkSession, dt1: String): collection.Map[String, Long] ={
+    val dataFrame = sparkSession.sql(
+      s"""
+         |select bizs  from persona.yylive_dws_user_feature  lateral view explode(split(biz_watch_top5_d30,",")) a as bizs
+         | WHERE dt="${dt1}" and biz_watch_top5_d30 is not null group by bizs
+       """.stripMargin)
+    dataFrame.rdd.map(p => {
+      p.getString(0)
+    }).distinct().zipWithIndex().collectAsMap()
+  }
+
 }
