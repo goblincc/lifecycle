@@ -2,7 +2,8 @@ package model
 
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.ml.classification.GBTClassifier
-import org.apache.spark.ml.feature.{OneHotEncoderEstimator, OneHotEncoderModel, StringIndexer, VectorAssembler}
+import org.apache.spark.ml.evaluation.{BinaryClassificationEvaluator, MulticlassClassificationEvaluator}
+import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import utils.TimeUtils
@@ -110,10 +111,8 @@ object GbdtTrain {
        """.stripMargin
     println("sqlText", sqlText)
     val data = sparkSession.sql(sqlText)
-    data.show(5, false)
-
-//    val data = sampleData(datas)
-
+    data.show(10, false)
+    println("*************************==================*********************************")
 //    类别型特征采用onehot处理
     val category_col = getCategoryCol()
     val stagesArray = new ListBuffer[PipelineStage]()
@@ -140,16 +139,22 @@ object GbdtTrain {
       .setInputCols(assemblerInputs)
       .setOutputCol("features")
 
+    val pca = new PCA()
+      .setInputCol("features")
+      .setOutputCol("pcaFeatures")
+      .setK(20)
+
     // Split the data into training and test sets (30% held out for testing).
     val Array(trainingData, testData) = data.randomSplit(Array(0.7, 0.3))
 
     // Train a GBT model.
     val gbt = new GBTClassifier()
       .setLabelCol("label")
-      .setFeaturesCol("features")
+      .setFeaturesCol("pcaFeatures")
       .setMaxIter(10)
 
     stagesArray.append(assembler)
+    stagesArray.append(pca)
     stagesArray.append(gbt)
     // Chain indexers and GBT in a Pipeline.
     val pipeline = new Pipeline()
@@ -191,8 +196,13 @@ object GbdtTrain {
         """
     )
     trained_matrix.show()
-    sparkSession.close()
 
+    val evaluator = new BinaryClassificationEvaluator()
+    evaluator.setMetricName("areaUnderROC")
+    val auc= evaluator.evaluate(predictions)
+    println("auc:" + auc)
+
+    sparkSession.close()
   }
 
   def sampleData(data: DataFrame): DataFrame ={
@@ -245,7 +255,7 @@ object GbdtTrain {
   }
 
   def getNumericCol():Array[String]={
-    Array("start_cnt_d1","start_cnt_d3","start_cnt_d7","start_cnt_d14","start_cnt_d30",
+    Array("start_cnt_d1","start_cnt_d3","start_cnt_d7","start_cnt_d14","start_cnt_d30","biz_watch_top5_d30",
       "active_days_d1", "active_days_d3", "active_days_d7", "active_days_d14", "active_days_d30",
       "total_watch_dr_d1", "total_watch_dr_d3", "total_watch_dr_d7","total_watch_dr_d14","total_watch_dr_d30",
       "avg_watch_dr_d1", "avg_watch_dr_d3", "avg_watch_dr_d7", "avg_watch_dr_d14","avg_watch_dr_d30",
