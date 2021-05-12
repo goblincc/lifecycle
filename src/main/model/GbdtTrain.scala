@@ -113,7 +113,7 @@ object GbdtTrain {
     val data = sparkSession.sql(sqlText)
     data.show(10, false)
     println("*************************==================*********************************")
-//    类别型特征采用onehot处理
+
     val category_col = getCategoryCol()
     val stagesArray = new ListBuffer[PipelineStage]()
     val indexArray = new ListBuffer[String]()
@@ -143,9 +143,6 @@ object GbdtTrain {
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
       .setK(20)
-
-    // Split the data into training and test sets (30% held out for testing).
-    val Array(trainingData, testData) = data.randomSplit(Array(0.7, 0.3))
 
     // Train a GBT model.
     val gbt = new GBTClassifier()
