@@ -4,8 +4,10 @@ import org.apache.spark.ml.{Pipeline, PipelineStage, linalg}
 import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier, MultilayerPerceptronClassifier}
 import org.apache.spark.ml.evaluation.{BinaryClassificationEvaluator, MulticlassClassificationEvaluator}
 import org.apache.spark.ml.feature._
-import org.apache.spark.ml.linalg.Vectors
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.ml.linalg.{DenseVector, Vectors}
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import utils.TimeUtils
 
 import scala.collection.mutable.ListBuffer
@@ -21,7 +23,7 @@ object GbdtTrain {
     registUDF(sparkSession,map)
     val data = layerSampleData(sparkSession, dt)
     data.show(10, false)
-    println("*******************************++++*************************************")
+    println("************************==================*************************************")
 
     val category_col = getCategoryCol()
     val stagesArray = new ListBuffer[PipelineStage]()
@@ -51,7 +53,7 @@ object GbdtTrain {
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
-      .setK(50)
+      .setK(70)
       println("pca len:" + pca.getK)
 
     val trainer = new GBTClassifier()
@@ -61,7 +63,7 @@ object GbdtTrain {
 
     println("getMaxIter:" + trainer.getMaxIter)
 
-//    val layers = Array[Int](pca.getK, 140, 140, 2)
+//    val layers = Array[Int](pca.getK, 280, 140, 2)
 //    println("layers 0:" + layers(0))
 //    val trainer = new MultilayerPerceptronClassifier()
 //      .setLayers(layers)
@@ -71,6 +73,7 @@ object GbdtTrain {
 //      .setFeaturesCol("pcaFeatures")
 //      .setLabelCol("label")
 //      .setSolver("l-bfgs")
+
 
     stagesArray.append(assembler)
     stagesArray.append(pca)
@@ -100,6 +103,7 @@ object GbdtTrain {
       .createOrReplaceTempView("gbdt_test")
     getIndicators(sparkSession, "gbdt_test")
 
+    saveData2hive(sparkSession, dt, predictTest)
 
     val evaluator = new BinaryClassificationEvaluator()
     evaluator.setMetricName("areaUnderROC")
@@ -109,11 +113,38 @@ object GbdtTrain {
     val testAuc= evaluator.evaluate(predictTest)
     println(" test auc:" + testAuc)
 
+
     val gbtModel = model.stages(11).asInstanceOf[GBTClassificationModel]
-    println(s"Learned classification GBT model:\n ${gbtModel.toDebugString}")
+//    println(s"Learned classification GBT model:\n ${gbtModel.toDebugString}")
     val importances: linalg.Vector = gbtModel.featureImportances
     println("feature importances:" + importances)
     sparkSession.close()
+  }
+
+  def saveData2hive(spark:SparkSession, dt: String, dataFrame: DataFrame): Unit ={
+    val structFields = Array(
+      StructField("hdid",StringType,true),
+      StructField("prediction",DoubleType,true),
+      StructField("label",IntegerType,true),
+      StructField("probability",DoubleType,true)
+    )
+    val structType = DataTypes.createStructType(structFields)
+    val row: RDD[Row] = dataFrame.select("hdid", "prediction", "label", "probability").rdd.map(f = p => {
+      val hdid = p.getString(0)
+      val prediction = p.getString(1)
+      val label = p.getDouble(2)
+      val probability = p.getAs[DenseVector](3)(1)
+      Row(hdid, prediction, label, probability)
+    })
+
+    spark.createDataFrame(row,structType).createOrReplaceTempView("tb_save")
+
+    val dt30 = TimeUtils.addDate(dt, 30)
+    spark.sql(
+      s"""
+         |insert overwrite table persona.yylive_dws_user_life_predict partition(dt='${dt30}')
+         |	select * from tb_save
+       """.stripMargin)
   }
 
   def getIndicators(sparkSession: SparkSession, table: String): Unit ={
@@ -172,10 +203,10 @@ object GbdtTrain {
   }
 
   def getTestData(sparkSession: SparkSession, dt: String): DataFrame = {
-    val dt7 = TimeUtils.addDate(dt, 6)
+    val dt30 = TimeUtils.addDate(dt, 30)
     val sqlText = s"""
                      |SELECT *, to_vector(biz_watch_top5_d30) as biz_watch_top5_d30_vec FROM
-                     |persona.yylive_dws_user_lifecycle_feature where dt in( '${dt7}')""".stripMargin
+                     |persona.yylive_dws_user_lifecycle_feature where dt in( '${dt30}')""".stripMargin
     println("getTestData:" + sqlText)
     sparkSession.sql(sqlText)
   }
@@ -216,7 +247,7 @@ object GbdtTrain {
   }
 
   def getCategoryCol():Array[String]={
-    Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14", "start_period_d30")
+    Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14", "start_period_d30", "city_level", "sjp")
   }
 
   def getNumericCol():Array[String]={
@@ -233,7 +264,7 @@ object GbdtTrain {
       "exposure_cnt_d1","exposure_cnt_d3","exposure_cnt_d7","exposure_cnt_d14", "exposure_cnt_d30",
       "click_cnt_d1","click_cnt_d3","click_cnt_d7","click_cnt_d14","click_cnt_d30",
       "push_click_cnt_d1","push_click_cnt_d3", "push_click_cnt_d7","push_click_cnt_d14","push_click_cnt_d30",
-      "push_click_day_d1", "push_click_day_d3", "push_click_day_d7","push_click_day_d14","push_click_day_d30"
+      "push_click_day_d1", "push_click_day_d3", "push_click_day_d7","push_click_day_d14","push_click_day_d30", "live_cnt"
     )
   }
 }
