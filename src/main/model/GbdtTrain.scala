@@ -23,7 +23,7 @@ object GbdtTrain {
     registUDF(sparkSession,map)
     val data = layerSampleData(sparkSession, dt)
     data.show(10, false)
-    println("************************==================*************************************")
+    println("************************+++++++++++++++*************************************")
 
     val category_col = getCategoryCol()
     val stagesArray = new ListBuffer[PipelineStage]()
@@ -74,7 +74,6 @@ object GbdtTrain {
 //      .setLabelCol("label")
 //      .setSolver("l-bfgs")
 
-
     stagesArray.append(assembler)
     stagesArray.append(pca)
     stagesArray.append(trainer)
@@ -88,14 +87,12 @@ object GbdtTrain {
 
     println("model.stages lens:" + model.stages.length)
 
-
     // Make predictions.
     val predictTrain = model.transform(data)
     predictTrain.show(10, false)
     predictTrain.select("label", "prediction")
       .createOrReplaceTempView("gbdt_trained")
     getIndicators(sparkSession, "gbdt_trained")
-
 
     val testData = getTestData(sparkSession, dt)
     val predictTest = model.transform(testData)
@@ -129,10 +126,10 @@ object GbdtTrain {
       StructField("probability",DoubleType,true)
     )
     val structType = DataTypes.createStructType(structFields)
-    val row: RDD[Row] = dataFrame.select("hdid", "prediction", "label", "probability").rdd.map(f = p => {
+    val row: RDD[Row] = dataFrame.select("hdid", "prediction", "label", "probability").rdd.map(p => {
       val hdid = p.getString(0)
-      val prediction = p.getString(1)
-      val label = p.getDouble(2)
+      val prediction = p.getDouble(1)
+      val label = p.getInt(2)
       val probability = p.getAs[DenseVector](3)(1)
       Row(hdid, prediction, label, probability)
     })
