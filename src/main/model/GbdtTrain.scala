@@ -63,16 +63,16 @@ object GbdtTrain {
 
     println("getMaxIter:" + trainer.getMaxIter)
 
-//    val layers = Array[Int](pca.getK, 280, 140, 2)
-//    println("layers 0:" + layers(0))
-//    val trainer = new MultilayerPerceptronClassifier()
-//      .setLayers(layers)
-//      .setBlockSize(128)
-//      .setSeed(1234L)
-//      .setMaxIter(50)
-//      .setFeaturesCol("pcaFeatures")
-//      .setLabelCol("label")
-//      .setSolver("l-bfgs")
+/*    val layers = Array[Int](pca.getK, 280, 140, 2)
+    println("layers 0:" + layers(0))
+    val trainer = new MultilayerPerceptronClassifier()
+      .setLayers(layers)
+      .setBlockSize(128)
+      .setSeed(1234L)
+      .setMaxIter(50)
+      .setFeaturesCol("pcaFeatures")
+      .setLabelCol("label")
+      .setSolver("l-bfgs")*/
 
     stagesArray.append(assembler)
     stagesArray.append(pca)
@@ -111,7 +111,7 @@ object GbdtTrain {
     println(" test auc:" + testAuc)
 
 
-    val gbtModel = model.stages(11).asInstanceOf[GBTClassificationModel]
+    val gbtModel = model.stages(13).asInstanceOf[GBTClassificationModel]
 //    println(s"Learned classification GBT model:\n ${gbtModel.toDebugString}")
     val importances: linalg.Vector = gbtModel.featureImportances
     println("feature importances:" + importances)
