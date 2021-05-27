@@ -13,19 +13,38 @@ import utils.TimeUtils
 import scala.collection.mutable.ListBuffer
 
 object GbdtTrain {
+
+  val category_col = Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14", "start_period_d30", "city_level", "sjp")
+
+  val numeric_Col = Array("start_cnt_d1","start_cnt_d3","start_cnt_d7","start_cnt_d14","start_cnt_d30",
+    "active_days_d1", "active_days_d3", "active_days_d7", "active_days_d14", "active_days_d30",
+    "total_watch_dr_d1", "total_watch_dr_d3", "total_watch_dr_d7","total_watch_dr_d14","total_watch_dr_d30",
+    "avg_watch_dr_d1", "avg_watch_dr_d3", "avg_watch_dr_d7", "avg_watch_dr_d14","avg_watch_dr_d30",
+    "search_cnt_d1", "search_cnt_d3", "search_cnt_d7", "search_cnt_d14", "search_cnt_d30",
+    "consume_cnt_d1", "consume_cnt_d3", "consume_cnt_d7","consume_cnt_d14","consume_cnt_d30",
+    "channel_msg_cnt_d1","channel_msg_cnt_d3","channel_msg_cnt_d7","channel_msg_cnt_d14","channel_msg_cnt_d30",
+    "consume_money_d1","consume_money_d3", "consume_money_d7", "consume_money_d14","consume_money_d30",
+    "cancel_cnt_d1","cancel_cnt_d3","cancel_cnt_d7","cancel_cnt_d14","cancel_cnt_d30",
+    "subscribe_cnt_d1", "subscribe_cnt_d3","subscribe_cnt_d7","subscribe_cnt_d14","subscribe_cnt_d30",
+    "exposure_cnt_d1","exposure_cnt_d3","exposure_cnt_d7","exposure_cnt_d14", "exposure_cnt_d30",
+    "click_cnt_d1","click_cnt_d3","click_cnt_d7","click_cnt_d14","click_cnt_d30",
+    "push_click_cnt_d1","push_click_cnt_d3", "push_click_cnt_d7","push_click_cnt_d14","push_click_cnt_d30",
+    "push_click_day_d1", "push_click_day_d3", "push_click_day_d7","push_click_day_d14","push_click_day_d30", "live_cnt"
+  )
+
+
   def main(args: Array[String]): Unit = {
     val dt = args(0)
     val dt1 = TimeUtils.changFormat(dt)
     val sparkSession = SparkSession.builder().enableHiveSupport().getOrCreate()
     sparkSession.sparkContext.setLogLevel("warn")
 
-    val map = getBizMap(sparkSession, dt1)
-    registUDF(sparkSession,map)
+//    val map = getBizMap(sparkSession, dt1)
+//    registUDF(sparkSession,map)
     val data = layerSampleData(sparkSession, dt)
     data.show(10, false)
     println("************************+++++++++++++++*************************************")
 
-    val category_col = getCategoryCol()
     val stagesArray = new ListBuffer[PipelineStage]()
     val indexArray = new ListBuffer[String]()
     val vecArray = new ListBuffer[String]()
@@ -41,8 +60,6 @@ object GbdtTrain {
       .setOutputCols(vecArray.toArray)
 
     stagesArray.append(oneHotEncoder)
-
-    val numeric_Col = getNumericCol()
 
     val assemblerInputs = category_col.map(_ + "Vec") ++ numeric_Col
 
@@ -85,6 +102,9 @@ object GbdtTrain {
     // Train model. This also runs the indexers.
     val model = pipeline.fit(data)
 
+    val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
+    model.save(output + "/pipeline_" + dt )
+
     println("model.stages lens:" + model.stages.length)
 
     // Make predictions.
@@ -110,9 +130,9 @@ object GbdtTrain {
     val testAuc= evaluator.evaluate(predictTest)
     println(" test auc:" + testAuc)
 
-
     val gbtModel = model.stages(13).asInstanceOf[GBTClassificationModel]
 //    println(s"Learned classification GBT model:\n ${gbtModel.toDebugString}")
+
     val importances: linalg.Vector = gbtModel.featureImportances
     println("feature importances:" + importances)
     sparkSession.close()
@@ -189,7 +209,7 @@ object GbdtTrain {
       val dt7 = TimeUtils.addDate(dt, -6)
       val dt9 = TimeUtils.addDate(dt, -8)
       val sqlText = s"""
-                       |SELECT *, to_vector(biz_watch_top5_d30) as biz_watch_top5_d30_vec FROM
+                       |SELECT * FROM
                        |persona.yylive_dws_user_lifecycle_feature where dt in( '${dt1}', '${dt3}','${dt7}', '${dt9}')""".stripMargin
       println("layerSampleData:" + sqlText)
       val allData = sparkSession.sql(sqlText)
@@ -202,7 +222,7 @@ object GbdtTrain {
   def getTestData(sparkSession: SparkSession, dt: String): DataFrame = {
     val dt30 = TimeUtils.addDate(dt, 30)
     val sqlText = s"""
-                     |SELECT *, to_vector(biz_watch_top5_d30) as biz_watch_top5_d30_vec FROM
+                     |SELECT * FROM
                      |persona.yylive_dws_user_lifecycle_feature where dt in( '${dt30}')""".stripMargin
     println("getTestData:" + sqlText)
     sparkSession.sql(sqlText)
@@ -243,25 +263,4 @@ object GbdtTrain {
     }).distinct().zipWithIndex().collectAsMap()
   }
 
-  def getCategoryCol():Array[String]={
-    Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14", "start_period_d30", "city_level", "sjp")
-  }
-
-  def getNumericCol():Array[String]={
-    Array[String]("start_cnt_d1","start_cnt_d3","start_cnt_d7","start_cnt_d14","start_cnt_d30","biz_watch_top5_d30_vec",
-      "active_days_d1", "active_days_d3", "active_days_d7", "active_days_d14", "active_days_d30",
-      "total_watch_dr_d1", "total_watch_dr_d3", "total_watch_dr_d7","total_watch_dr_d14","total_watch_dr_d30",
-      "avg_watch_dr_d1", "avg_watch_dr_d3", "avg_watch_dr_d7", "avg_watch_dr_d14","avg_watch_dr_d30",
-      "search_cnt_d1", "search_cnt_d3", "search_cnt_d7", "search_cnt_d14", "search_cnt_d30",
-      "consume_cnt_d1", "consume_cnt_d3", "consume_cnt_d7","consume_cnt_d14","consume_cnt_d30",
-      "channel_msg_cnt_d1","channel_msg_cnt_d3","channel_msg_cnt_d7","channel_msg_cnt_d14","channel_msg_cnt_d30",
-      "consume_money_d1","consume_money_d3", "consume_money_d7", "consume_money_d14","consume_money_d30",
-      "cancel_cnt_d1","cancel_cnt_d3","cancel_cnt_d7","cancel_cnt_d14","cancel_cnt_d30",
-      "subscribe_cnt_d1", "subscribe_cnt_d3","subscribe_cnt_d7","subscribe_cnt_d14","subscribe_cnt_d30",
-      "exposure_cnt_d1","exposure_cnt_d3","exposure_cnt_d7","exposure_cnt_d14", "exposure_cnt_d30",
-      "click_cnt_d1","click_cnt_d3","click_cnt_d7","click_cnt_d14","click_cnt_d30",
-      "push_click_cnt_d1","push_click_cnt_d3", "push_click_cnt_d7","push_click_cnt_d14","push_click_cnt_d30",
-      "push_click_day_d1", "push_click_day_d3", "push_click_day_d7","push_click_day_d14","push_click_day_d30", "live_cnt"
-    )
-  }
 }
