@@ -37,7 +37,7 @@ object DocCTR {
     registUDF(spark, docVecMap)
     val sqltxt =
       s"""
-         |select *, docVector(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25'
+         |select *, docVector(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25' and title_length is not null
        """.stripMargin
 
     val datas = spark.sql(sqltxt)
@@ -107,6 +107,20 @@ object DocCTR {
     evaluator.setMetricName("areaUnderROC")
     val trainAuc= evaluator.evaluate(predictTrain)
     println(" train auc:" + trainAuc)
+
+
+    val testData = spark.sql(
+      s"""
+         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-26' and title_length is not null
+       """.stripMargin)
+
+    val predictTest = model.transform(testData)
+    predictTest.select("label", "prediction")
+      .createOrReplaceTempView("test")
+    getIndicators(spark, "test")
+
+    val testAuc= evaluator.evaluate(predictTest)
+    println(" test auc:" + testAuc)
 
     spark.close()
   }

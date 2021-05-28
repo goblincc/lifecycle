@@ -1,7 +1,5 @@
 package model
 
-import model.DocCTR.doc2vecPath
-import model.GbdtTrain.saveData2hive
 import org.apache.spark.ml.PipelineModel
 import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.rdd.RDD
@@ -9,12 +7,12 @@ import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types._
 import utils.TimeUtils
 
-class GbtPredict {
+object GbtPredict {
 
   val modelPath = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
 
   def main(args: Array[String]): Unit = {
-    val dt = args(0)
+    val dt = TimeUtils.changFormat(args(0))
     val sparkSession = SparkSession.builder().enableHiveSupport().getOrCreate()
     sparkSession.sparkContext.setLogLevel("warn")
 
@@ -22,12 +20,13 @@ class GbtPredict {
       s"""
          |select * from persona.yylive_dws_user_lifecycle_predict_feature  WHERE dt = '${dt}'
        """.stripMargin
+    print("sqlTxt:", sqlTxt)
     val data = sparkSession.sql(sqlTxt)
     val model_dt = TimeUtils.addDate(dt, -10)
-    val model = PipelineModel.read.load( modelPath + "/pipeline_" + model_dt)
+    val model = PipelineModel.read.load( modelPath + "/pipeline_20210416" )
 
     val predict = model.transform(data)
-
+    predict.show(5, false)
     saveData2hive(sparkSession, dt, predict)
 
   }
@@ -39,10 +38,10 @@ class GbtPredict {
       StructField("probability",DoubleType,true)
     )
     val structType = DataTypes.createStructType(structFields)
-    val row: RDD[Row] = dataFrame.select("hdid", "prediction", "label", "probability").rdd.map(p => {
+    val row: RDD[Row] = dataFrame.select("hdid", "prediction", "probability").rdd.map(p => {
       val hdid = p.getString(0)
       val prediction = p.getDouble(1)
-      val probability = p.getAs[DenseVector](3)(1)
+      val probability = p.getAs[DenseVector](2)(1)
       Row(hdid, prediction, probability)
     })
 
