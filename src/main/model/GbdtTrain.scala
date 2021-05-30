@@ -196,7 +196,7 @@ object GbdtTrain {
   def sampleData(data: DataFrame): DataFrame ={
     val pos_data = data.where("label = 1")
     val neg_data = data.where("label = 0")
-    val ratio = pos_data.count()/neg_data.count()
+    val ratio = pos_data.count() * 1.0/neg_data.count()
     println("pos_data", pos_data.count())
     println("neg_data", neg_data.count())
     val dataFrame = pos_data.union(neg_data.sample(false, ratio * 2))

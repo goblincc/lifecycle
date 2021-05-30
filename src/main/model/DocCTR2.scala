@@ -1,17 +1,15 @@
 package model
 
-import model.GbdtTrain.getIndicators
-import org.apache.spark.ml.{Pipeline, PipelineStage}
-import org.apache.spark.ml.classification.{GBTClassifier, LogisticRegression}
+import org.apache.spark.ml.classification.GBTClassifier
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{DenseVector, Vectors}
+import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import utils.TimeUtils
 
 import scala.collection.mutable.ListBuffer
 
-object DocCTR {
+object DocCTR2 {
   val doc2vecPath = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang"
 
   val category_col = Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14",
@@ -68,7 +66,7 @@ object DocCTR {
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
-      .setK(50)
+      .setK(70)
     println("pca len:" + pca.getK)
    /* /**
       * setMaxIter，最大迭代次数，训练的截止条件，默认100次
@@ -90,7 +88,6 @@ object DocCTR {
     val trainer = new GBTClassifier()
       .setLabelCol("label")
       .setFeaturesCol("pcaFeatures")
-      .setMaxDepth(6)
       .setMaxIter(20)
 
     stagesArray.append(assembler)
@@ -176,9 +173,8 @@ object DocCTR {
   def sampleData(data: DataFrame): DataFrame ={
     val pos_data = data.where("label = 1")
     val neg_data = data.where("label = 0")
-    val ratio = pos_data.count() * 1.0/neg_data.count()
-    println("ratio", ratio)
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 20))
+    val ratio = pos_data.count()/neg_data.count()
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 3))
     println("pos_data",dataFrame.where("label = 1").count())
     println("neg_data",dataFrame.where("label = 0").count())
     dataFrame
