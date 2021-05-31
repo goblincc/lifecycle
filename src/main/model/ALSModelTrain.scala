@@ -99,7 +99,7 @@ object ALSModelTrain {
     println(s"Root-mean-square error = $rmse")
 
     model.itemFactors.show(5, false)
-    model.save(output + "/AlsModel")
+    model.write.overwrite().save(output + "/AlsModel")
 
   }
 

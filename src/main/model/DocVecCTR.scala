@@ -1,17 +1,17 @@
 package model
 
-import org.apache.spark.ml.{Pipeline, PipelineStage}
-import org.apache.spark.ml.classification.{GBTClassifier, LogisticRegression}
+import org.apache.spark.ml.classification.GBTClassifier
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{DenseVector, Vectors}
 import org.apache.spark.ml.recommendation.ALSModel
+import org.apache.spark.ml.{Pipeline, PipelineStage, linalg}
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import utils.TimeUtils
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-object DocCTR {
+object DocVecCTR {
   val doc2vecPath = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang"
 
   val category_col = Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14",
@@ -35,10 +35,27 @@ object DocCTR {
       .enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
     val docVecMap: collection.Map[String, DenseVector] = getDocVec()
-    registUDF(spark, docVecMap)
+
+    val doc2Int: collection.Map[String, Int] = spark.sql("SELECT * FROM persona.yylive_dws_doc_index  WHERE dt='2021-05-28'")
+      .rdd.map(p => {
+      (p.getAs[String](0), p.getAs[Int](1))
+    }).collectAsMap()
+
+    val alsModel: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel")
+
+    val intToVector: collection.Map[Int, linalg.Vector] = alsModel.itemFactors.rdd.map(p => {
+      val idx = p.getAs[Int](0)
+      val arr = p.getAs[mutable.WrappedArray[Float]](1)
+      val vector: linalg.Vector = Vectors.dense(
+        arr.map(_.toDouble).toArray
+      )
+      (idx, vector)
+    }).collectAsMap()
+
+    registUDF(spark, docVecMap,doc2Int,intToVector)
     val sqltxt =
       s"""
-         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-21' and title_length is not null
+         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25' and title_length is not null
        """.stripMargin
 
     val datas = spark.sql(sqltxt)
@@ -61,7 +78,7 @@ object DocCTR {
 
     stagesArray.append(oneHotEncoder)
 
-    val assemblerInputs = category_col.map(_ + "Vec") ++ numeric_Col
+    val assemblerInputs = category_col.map(_ + "Vec") ++ numeric_Col ++ Array("docVec")
 
     val assembler = new VectorAssembler()
       .setInputCols(assemblerInputs)
@@ -119,7 +136,7 @@ object DocCTR {
 
     val testData = spark.sql(
       s"""
-         |select *  from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-28' and title_length is not null
+         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-26' and title_length is not null
        """.stripMargin)
 
     val predictTest = model.transform(testData)
@@ -133,9 +150,14 @@ object DocCTR {
     spark.close()
   }
 
-  def registUDF(spark: SparkSession, map: collection.Map[String, DenseVector]): Unit = {
+  def registUDF(spark: SparkSession, map: collection.Map[String, DenseVector], doc2Int: collection.Map[String, Int], intToVector: collection.Map[Int, linalg.Vector]): Unit = {
     spark.udf.register("docVector", (s: String) => {
       map.getOrElse(s, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0)))
+    })
+
+    spark.udf.register("docVec2", (s: String) => {
+      val idx = doc2Int.getOrElse(s, -1)
+      intToVector.getOrElse(idx, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
     })
 
   }
@@ -181,7 +203,7 @@ object DocCTR {
     val neg_data = data.where("label = 0")
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("ratio", ratio)
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 100))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 20))
     println("pos_data",dataFrame.where("label = 1").count())
     println("neg_data",dataFrame.where("label = 0").count())
     dataFrame
