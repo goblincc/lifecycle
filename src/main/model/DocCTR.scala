@@ -1,11 +1,11 @@
 package model
 
-import model.GbdtTrain.getIndicators
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.ml.classification.{GBTClassifier, LogisticRegression}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{DenseVector, Vectors}
+import org.apache.spark.ml.recommendation.ALSModel
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import utils.TimeUtils
 
@@ -30,13 +30,15 @@ object DocCTR {
     "click_14","click_30","click_90","wilson_ctr_1","wilson_ctr_3","wilson_ctr_7","wilson_ctr_14","wilson_ctr_30" )
 
   def main(args: Array[String]): Unit = {
-    val spark = SparkSession.builder().enableHiveSupport().getOrCreate()
+    val spark = SparkSession.builder()
+      .config("spark.hadoop.validateOutputSpecs", value = false)
+      .enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
     val docVecMap: collection.Map[String, DenseVector] = getDocVec()
     registUDF(spark, docVecMap)
     val sqltxt =
       s"""
-         |select *, docVector(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25' and title_length is not null
+         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25' and title_length is not null
        """.stripMargin
 
     val datas = spark.sql(sqltxt)
@@ -59,7 +61,7 @@ object DocCTR {
 
     stagesArray.append(oneHotEncoder)
 
-    val assemblerInputs = category_col.map(_ + "Vec") ++ numeric_Col
+    val assemblerInputs = category_col.map(_ + "Vec") ++ numeric_Col ++ Array("docVec")
 
     val assembler = new VectorAssembler()
       .setInputCols(assemblerInputs)
@@ -117,7 +119,7 @@ object DocCTR {
 
     val testData = spark.sql(
       s"""
-         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-26' and title_length is not null
+         |select *  from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-26' and title_length is not null
        """.stripMargin)
 
     val predictTest = model.transform(testData)
@@ -131,10 +133,24 @@ object DocCTR {
     spark.close()
   }
 
-  def registUDF(sparkSession: SparkSession, map: collection.Map[String, DenseVector]): Unit ={
-    sparkSession.udf.register("docVector", (s: String) =>{
+  def registUDF(spark: SparkSession, map: collection.Map[String, DenseVector]): Unit = {
+    spark.udf.register("docVector", (s: String) => {
       map.getOrElse(s, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0)))
     })
+
+    /*spark.udf.register("docVec2", (s: String) => {
+      val doc2Int: collection.Map[String, Int] = spark.sql("SELECT * FROM persona.yylive_dws_doc_index  WHERE dt='2021-05-28'")
+        .rdd.map(p => {
+        (p.getAs[String](0), p.getAs[Int](1))
+      }).collectAsMap()
+      val model: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel")
+      val intToVector: collection.Map[Int, DenseVector] = model.itemFactors.rdd.map(p => {
+        (p.getAs[Int](0), p.getAs[DenseVector](1))
+      }).collectAsMap()
+      val idx = doc2Int.getOrElse(s, -1)
+      intToVector.getOrElse(idx, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
+    })*/
+
   }
 
   def getDocVec(): collection.Map[String, DenseVector] ={
@@ -184,6 +200,8 @@ object DocCTR {
     dataFrame
 
   }
+
+
 
 
 }

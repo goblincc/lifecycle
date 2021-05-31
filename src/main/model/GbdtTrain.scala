@@ -36,7 +36,9 @@ object GbdtTrain {
   def main(args: Array[String]): Unit = {
     val dt = args(0)
     val dt1 = TimeUtils.changFormat(dt)
-    val sparkSession = SparkSession.builder().enableHiveSupport().getOrCreate()
+    val sparkSession = SparkSession.builder()
+      .config("spark.hadoop.validateOutputSpecs", value = false)
+      .enableHiveSupport().getOrCreate()
     sparkSession.sparkContext.setLogLevel("warn")
 
 //    val map = getBizMap(sparkSession, dt1)

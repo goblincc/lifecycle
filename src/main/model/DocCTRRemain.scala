@@ -9,7 +9,7 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 
 import scala.collection.mutable.ListBuffer
 
-object DocCTR2 {
+object DocCTRRemain {
   val doc2vecPath = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang"
 
   val category_col = Array("sex","bd_consum", "bd_marriage","bd_subconsum", "sys", "start_period_d7", "start_period_d14",
@@ -34,12 +34,11 @@ object DocCTR2 {
     registUDF(spark, docVecMap)
     val sqltxt =
       s"""
-         |select *, docVector(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25' and title_length is not null
+         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt = '2021-05-01' and title_length is not null
        """.stripMargin
 
-    val datas = spark.sql(sqltxt)
-    datas.show(5, false)
-    val data = sampleData(datas)
+    val data = spark.sql(sqltxt)
+    data.show(5, false)
 
     val stagesArray = new ListBuffer[PipelineStage]()
     val indexArray = new ListBuffer[String]()
@@ -86,7 +85,7 @@ object DocCTR2 {
       .setElasticNetParam(0.8)*/
 
     val trainer = new GBTClassifier()
-      .setLabelCol("label")
+      .setLabelCol("r_label")
       .setFeaturesCol("pcaFeatures")
       .setMaxIter(20)
 
@@ -102,7 +101,7 @@ object DocCTR2 {
 
     val predictTrain = model.transform(data)
     predictTrain.show(10, false)
-    predictTrain.select("label", "prediction")
+    predictTrain.select("r_label", "prediction")
       .createOrReplaceTempView("trained")
     getIndicators(spark, "trained")
 
@@ -114,11 +113,11 @@ object DocCTR2 {
 
     val testData = spark.sql(
       s"""
-         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-26' and title_length is not null
+         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-20' and title_length is not null
        """.stripMargin)
 
     val predictTest = model.transform(testData)
-    predictTest.select("label", "prediction")
+    predictTest.select("r_label", "prediction")
       .createOrReplaceTempView("test")
     getIndicators(spark, "test")
 
@@ -159,10 +158,10 @@ object DocCTR2 {
         from (
             select
                 count(1) as predict_cnt
-                ,count(if(label = 1.0 and prediction= 1.0, 1, null)) as TP
-                ,count(if(label = 0.0 and prediction= 1.0, 1, null)) as FP
-                ,count(if(label = 0.0 and prediction= 0.0, 1, null)) as TN
-                ,count(if(label = 1.0 and prediction= 0.0, 1, null)) as FN
+                ,count(if(r_label = 1.0 and prediction= 1.0, 1, null)) as TP
+                ,count(if(r_label = 0.0 and prediction= 1.0, 1, null)) as FP
+                ,count(if(r_label = 0.0 and prediction= 0.0, 1, null)) as TN
+                ,count(if(r_label = 1.0 and prediction= 0.0, 1, null)) as FN
             from ${table}
         )b
         """
@@ -171,12 +170,12 @@ object DocCTR2 {
   }
 
   def sampleData(data: DataFrame): DataFrame ={
-    val pos_data = data.where("label = 1")
-    val neg_data = data.where("label = 0")
-    val ratio = pos_data.count()/neg_data.count()
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 3))
-    println("pos_data",dataFrame.where("label = 1").count())
-    println("neg_data",dataFrame.where("label = 0").count())
+    val pos_data = data.where("r_label = 1")
+    val neg_data = data.where("r_label = 0")
+    val ratio = pos_data.count() * 1.0/neg_data.count()
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 2))
+    println("pos_data",dataFrame.where("r_label = 1").count())
+    println("neg_data",dataFrame.where("r_label = 0").count())
     dataFrame
 
   }

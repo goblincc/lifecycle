@@ -7,12 +7,15 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
 
-object ALSModel {
+object ALSModelTrain {
 
   val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS"
 
   def main(args: Array[String]): Unit = {
-    val spark = SparkSession.builder().enableHiveSupport().getOrCreate()
+    val spark = SparkSession.builder()
+      .config("spark.hadoop.validateOutputSpecs", value = false)
+      .enableHiveSupport()
+      .getOrCreate()
     spark.sparkContext.setLogLevel("warn")
     import spark.implicits._
     val sc = spark.sparkContext
@@ -29,8 +32,8 @@ object ALSModel {
     val user2Int: RDD[(String, Int)] = click_rdd.map(_._1).distinct().zipWithUniqueId().map(p => (p._1, p._2.toInt)).persist(StorageLevel.MEMORY_AND_DISK)
     val doc2Int: RDD[(String, Int)] = click_rdd.map(_._2).distinct().zipWithUniqueId().map(p => (p._1, p._2.toInt)).persist(StorageLevel.MEMORY_AND_DISK)
 
-    user2Int.toDF("hdid", "index").createOrReplaceGlobalTempView("user")
-    doc2Int.toDF("docid","index").createOrReplaceGlobalTempView("doc")
+    user2Int.toDF("hdid", "index").createOrReplaceTempView("user")
+    doc2Int.toDF("docid","index").createOrReplaceTempView("doc")
 
     spark.sql(
       s"""
