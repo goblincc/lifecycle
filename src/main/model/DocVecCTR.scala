@@ -53,9 +53,11 @@ object DocVecCTR {
     }).collectAsMap()
 
     registUDF(spark, docVecMap,doc2Int,intToVector)
+    println("========================================")
     val sqltxt =
       s"""
-         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-25' and title_length is not null
+         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature
+         |WHERE  dt in('2021-04-25' ,'2021-05-01','2021-05-06','2021-05-13', '2021-05-20') and title_length is not null
        """.stripMargin
 
     val datas = spark.sql(sqltxt)
@@ -87,7 +89,7 @@ object DocVecCTR {
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
-      .setK(50)
+      .setK(70)
     println("pca len:" + pca.getK)
    /* /**
       * setMaxIter，最大迭代次数，训练的截止条件，默认100次
@@ -203,7 +205,7 @@ object DocVecCTR {
     val neg_data = data.where("label = 0")
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("ratio", ratio)
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 20))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 100))
     println("pos_data",dataFrame.where("label = 1").count())
     println("neg_data",dataFrame.where("label = 0").count())
     dataFrame
