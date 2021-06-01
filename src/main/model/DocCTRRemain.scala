@@ -4,9 +4,11 @@ import org.apache.spark.ml.classification.GBTClassifier
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{DenseVector, Vectors}
-import org.apache.spark.ml.{Pipeline, PipelineStage}
+import org.apache.spark.ml.recommendation.ALSModel
+import org.apache.spark.ml.{Pipeline, PipelineStage, linalg}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 object DocCTRRemain {
@@ -31,13 +33,31 @@ object DocCTRRemain {
     val spark = SparkSession.builder().enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
     val docVecMap: collection.Map[String, DenseVector] = getDocVec()
-    registUDF(spark, docVecMap)
+
+    val doc2Int: collection.Map[String, Int] = spark.sql("SELECT * FROM persona.yylive_dws_doc_index  WHERE dt='2021-05-28'")
+      .rdd.map(p => {
+      (p.getAs[String](0), p.getAs[Int](1))
+    }).collectAsMap()
+
+    val alsModel: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel")
+
+    val intToVector: collection.Map[Int, linalg.Vector] = alsModel.itemFactors.rdd.map(p => {
+      val idx = p.getAs[Int](0)
+      val arr = p.getAs[mutable.WrappedArray[Float]](1)
+      val vector: linalg.Vector = Vectors.dense(
+        arr.map(_.toDouble).toArray
+      )
+      (idx, vector)
+    }).collectAsMap()
+
+    registUDF(spark, docVecMap, doc2Int,intToVector)
+    print("************************************************************************************")
     val sqltxt =
       s"""
-         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt = '2021-05-01' and title_length is not null
+         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt in('2021-04-26','2021-05-01', '2021-05-08', '2021-05-15') and title_length is not null
        """.stripMargin
 
-    val data = spark.sql(sqltxt)
+    val data = spark.sql(sqltxt).sample(false, 0.5)
     data.show(5, false)
 
     val stagesArray = new ListBuffer[PipelineStage]()
@@ -113,7 +133,7 @@ object DocCTRRemain {
 
     val testData = spark.sql(
       s"""
-         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-20' and title_length is not null
+         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-20' and title_length is not null
        """.stripMargin)
 
     val predictTest = model.transform(testData)
@@ -127,9 +147,14 @@ object DocCTRRemain {
     spark.close()
   }
 
-  def registUDF(sparkSession: SparkSession, map: collection.Map[String, DenseVector]): Unit ={
+  def registUDF(sparkSession: SparkSession, map: collection.Map[String, DenseVector],doc2Int: collection.Map[String, Int], intToVector: collection.Map[Int, linalg.Vector]): Unit ={
     sparkSession.udf.register("docVector", (s: String) =>{
       map.getOrElse(s, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0)))
+    })
+
+    sparkSession.udf.register("docVec2", (s: String) => {
+      val idx = doc2Int.getOrElse(s, -1)
+      intToVector.getOrElse(idx, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
     })
   }
 
