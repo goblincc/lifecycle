@@ -6,12 +6,14 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
+import utils.TimeUtils
 
 object ALSModelTrain {
 
   val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS"
 
   def main(args: Array[String]): Unit = {
+    val dt = TimeUtils.changFormat(args(0))
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport()
@@ -21,10 +23,11 @@ object ALSModelTrain {
     val sc = spark.sparkContext
     val sqlTxt =
       s"""
-         |SELECT hdid, docid, score FROM persona.yylive_lunxun_doc_hdid_score  WHERE dt="2021-05-28"
+         |SELECT hdid, docid, score FROM persona.yylive_lunxun_doc_hdid_score  WHERE dt="${dt}"
        """.stripMargin
 
     val data = spark.sql(sqlTxt)
+    data.show(5, false)
 
     val click_rdd: RDD[(String, String, Double)] = data.rdd.map(p => {
       (p.getAs[String](0), p.getAs[String](1), p.getAs[Float](2).toDouble)
@@ -37,13 +40,13 @@ object ALSModelTrain {
 
     spark.sql(
       s"""
-         |insert overwrite table persona.yylive_dws_user_index partition(dt='2021-05-28')
+         |insert overwrite table persona.yylive_dws_user_index partition(dt='${dt}')
          |	select * from user
        """.stripMargin)
 
     spark.sql(
       s"""
-         |insert overwrite table persona.yylive_dws_doc_index partition(dt='2021-05-28')
+         |insert overwrite table persona.yylive_dws_doc_index partition(dt='${dt}')
          |	select * from doc
        """.stripMargin)
 

@@ -53,7 +53,7 @@ object DocVecCTR {
     }).collectAsMap()
 
     registUDF(spark, docVecMap,doc2Int,intToVector)
-    println("========================================")
+    println("*******************************************************")
     val sqltxt =
       s"""
          |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature
@@ -123,6 +123,9 @@ object DocVecCTR {
 
     // Train model. This also runs the indexers.
     val model = pipeline.fit(data)
+
+    val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
+    model.write.overwrite().save(output + "/pipelineCTR")
 
     val predictTrain = model.transform(data)
     predictTrain.show(10, false)
@@ -205,7 +208,7 @@ object DocVecCTR {
     val neg_data = data.where("label = 0")
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("ratio", ratio)
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 100))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 20))
     println("pos_data",dataFrame.where("label = 1").count())
     println("neg_data",dataFrame.where("label = 0").count())
     dataFrame
