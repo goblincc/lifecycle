@@ -7,6 +7,7 @@ import org.apache.spark.ml.linalg.{DenseVector, Vectors}
 import org.apache.spark.ml.recommendation.ALSModel
 import org.apache.spark.ml.{Pipeline, PipelineStage, linalg}
 import org.apache.spark.sql.{DataFrame, SparkSession}
+import utils.TimeUtils
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
@@ -30,18 +31,19 @@ object DocVecCTR {
     "click_14","click_30","click_90","wilson_ctr_1","wilson_ctr_3","wilson_ctr_7","wilson_ctr_14","wilson_ctr_30" )
 
   def main(args: Array[String]): Unit = {
+    val dt = TimeUtils.changFormat(args(0))
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
     val docVecMap: collection.Map[String, DenseVector] = getDocVec()
 
-    val doc2Int: collection.Map[String, Int] = spark.sql("SELECT * FROM persona.yylive_dws_doc_index  WHERE dt='2021-05-28'")
+    val doc2Int: collection.Map[String, Int] = spark.sql(s"""SELECT * FROM persona.yylive_dws_doc_index  WHERE dt='${dt}'""")
       .rdd.map(p => {
       (p.getAs[String](0), p.getAs[Int](1))
     }).collectAsMap()
 
-    val alsModel: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel")
+    val alsModel: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel_" + dt)
 
     val intToVector: collection.Map[Int, linalg.Vector] = alsModel.itemFactors.rdd.map(p => {
       val idx = p.getAs[Int](0)
@@ -54,10 +56,14 @@ object DocVecCTR {
 
     registUDF(spark, docVecMap,doc2Int,intToVector)
     println("*******************************************************")
+    val dt7 = TimeUtils.addDate(dt, -6)
+    val dt14 = TimeUtils.addDate(dt, -13)
+    val dt21 = TimeUtils.addDate(dt, -20)
+    val dt28 = TimeUtils.addDate(dt, -27)
     val sqltxt =
       s"""
          |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature
-         |WHERE  dt in('2021-04-25' ,'2021-05-01','2021-05-06','2021-05-13', '2021-05-20') and title_length is not null
+         |WHERE  dt in('${dt28}' ,'${dt21}','${dt14}','${dt7}', '${dt}') and title_length is not null
        """.stripMargin
 
     val datas = spark.sql(sqltxt)
@@ -85,12 +91,15 @@ object DocVecCTR {
     val assembler = new VectorAssembler()
       .setInputCols(assemblerInputs)
       .setOutputCol("features")
+      .setHandleInvalid("skip")
 
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
       .setK(70)
     println("pca len:" + pca.getK)
+
+
    /* /**
       * setMaxIter，最大迭代次数，训练的截止条件，默认100次
       * setFamily，binomial(二分类)/multinomial(多分类)/auto，默认为auto。设为auto时，会根据schema或者样本中实际的class情况设置是二分类还是多分类，最好明确设置
@@ -114,6 +123,7 @@ object DocVecCTR {
       .setMaxDepth(6)
       .setMaxIter(20)
 
+
     stagesArray.append(assembler)
     stagesArray.append(pca)
     stagesArray.append(trainer)
@@ -125,7 +135,7 @@ object DocVecCTR {
     val model = pipeline.fit(data)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
-    model.write.overwrite().save(output + "/pipelineCTR")
+    model.write.overwrite().save(output + "/pipelineCTR_" + dt)
 
     val predictTrain = model.transform(data)
     predictTrain.show(10, false)
@@ -138,10 +148,10 @@ object DocVecCTR {
     val trainAuc= evaluator.evaluate(predictTrain)
     println(" train auc:" + trainAuc)
 
-
+    val test_dt = TimeUtils.addDate(dt, -10)
     val testData = spark.sql(
       s"""
-         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-26' and title_length is not null
+         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '${test_dt}' and title_length is not null
        """.stripMargin)
 
     val predictTest = model.transform(testData)

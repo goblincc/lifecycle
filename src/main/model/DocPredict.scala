@@ -23,7 +23,7 @@ object DocPredict {
       (p.getAs[String](0), p.getAs[Int](1))
     }).collectAsMap()
 
-    val alsModel: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel")
+    val alsModel: ALSModel = ALSModel.read.load("hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/ALS/AlsModel_"+ dt)
 
     val intToVector: collection.Map[Int, linalg.Vector] = alsModel.itemFactors.rdd.map(p => {
       val idx = p.getAs[Int](0)
@@ -43,7 +43,7 @@ object DocPredict {
     print("sqlTxt:", sqlTxt)
 
     val data = spark.sql(sqlTxt)
-    val model = PipelineModel.read.load( modelPath + "/pipelineCTR" )
+    val model = PipelineModel.read.load( modelPath + "/pipelineCTR_" + dt )
     val predict = model.transform(data)
     predict.show(5, false)
     saveData2hive(spark, dt, predict)
