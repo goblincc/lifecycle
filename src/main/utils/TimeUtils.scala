@@ -33,7 +33,7 @@ object TimeUtils {
       val fm = new SimpleDateFormat("yyyyMMdd")
       val date = fm.parse(dt)
       val addTime = date.getTime() + deltaDays * 86400 * 1000
-      println(addTime)
+//      println(addTime)
       changFormat(fm.format(new Date(addTime)))
     }
 
@@ -49,7 +49,7 @@ object TimeUtils {
     }
 
   def main(args: Array[String]): Unit = {
-    println(addDate("20210323", 30))
+    println(addDate("20210602", -10))
     println(changFormat("20210508"))
     println(1528783 * 1.0/481873671)
   }

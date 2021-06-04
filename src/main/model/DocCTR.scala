@@ -30,17 +30,21 @@ object DocCTR {
     "click_14","click_30","click_90","wilson_ctr_1","wilson_ctr_3","wilson_ctr_7","wilson_ctr_14","wilson_ctr_30" )
 
   def main(args: Array[String]): Unit = {
+    val dts = args(0)
+    val dt = TimeUtils.changFormat(dts)
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
-    val docVecMap: collection.Map[String, DenseVector] = getDocVec()
-    registUDF(spark, docVecMap)
+    val dt7 = TimeUtils.addDate(dts, -6)
+    val dt14 = TimeUtils.addDate(dts, -13)
+    val dt21 = TimeUtils.addDate(dts, -20)
+    val dt28 = TimeUtils.addDate(dts, -27)
     val sqltxt =
       s"""
-         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt >= '2021-04-25' and dt <= '2021-05-21' and title_length is not null
+         |select * from persona.yylive_dws_user_docid_ctr_feature  WHERE  dt in('${dt28}' ,'${dt21}','${dt14}','${dt7}', '${dt}') and title_length is not null
        """.stripMargin
-
+    println("train sql:",sqltxt)
     val datas = spark.sql(sqltxt)
     datas.show(5, false)
     val data = sampleData(datas)
@@ -70,24 +74,8 @@ object DocCTR {
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
-      .setK(50)
+      .setK(70)
     println("pca len:" + pca.getK)
-   /* /**
-      * setMaxIter，最大迭代次数，训练的截止条件，默认100次
-      * setFamily，binomial(二分类)/multinomial(多分类)/auto，默认为auto。设为auto时，会根据schema或者样本中实际的class情况设置是二分类还是多分类，最好明确设置
-      * setElasticNetParam，弹性参数，用于调节L1和L2之间的比例，两种正则化比例加起来是1，详见后面正则化的设置，默认为0，只使用L2正则化，设置为1就是只用L1正则化
-      * setRegParam，正则化系数，默认为0，不使用正则化
-      * setTol，训练的截止条件，两次迭代之间的改善小于tol训练将截止
-      * setFitIntercept，是否拟合截距，默认为true
-      * setStandardization，是否使用归一化，这里归一化只针对各维特征的方差进行
-      * setThresholds/setThreshold，设置多分类/二分类的判决阈值，多分类是一个数组，二分类是double值
-      * setAggregationDepth，设置分布式统计时的层数，主要用在treeAggregate中，数据量越大，可适当加大这个值，默认为2
-      */
-    val trainer = new LogisticRegression()
-      .setLabelCol("label")
-      .setFeaturesCol("features")
-      .setRegParam(0.3)
-      .setElasticNetParam(0.8)*/
 
     val trainer = new GBTClassifier()
       .setLabelCol("label")
@@ -105,6 +93,9 @@ object DocCTR {
     // Train model. This also runs the indexers.
     val model = pipeline.fit(data)
 
+    val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
+    model.write.overwrite().save(output + "/pipeDocCTR_" + dt)
+
     val predictTrain = model.transform(data)
     predictTrain.show(10, false)
     predictTrain.select("label", "prediction")
@@ -116,10 +107,10 @@ object DocCTR {
     val trainAuc= evaluator.evaluate(predictTrain)
     println(" train auc:" + trainAuc)
 
-
+    val test_dt = TimeUtils.addDate(dts, -10)
     val testData = spark.sql(
       s"""
-         |select *  from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '2021-05-28' and title_length is not null
+         |select *  from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '${test_dt}' and title_length is not null
        """.stripMargin)
 
     val predictTest = model.transform(testData)
@@ -133,12 +124,6 @@ object DocCTR {
     spark.close()
   }
 
-  def registUDF(spark: SparkSession, map: collection.Map[String, DenseVector]): Unit = {
-    spark.udf.register("docVector", (s: String) => {
-      map.getOrElse(s, Vectors.dense(Array(0.0, 0.0, 0.0, 0.0, 0.0)))
-    })
-
-  }
 
   def getDocVec(): collection.Map[String, DenseVector] ={
     val w2vModel: Word2VecModel = Word2VecModel.read.load(doc2vecPath + "/model")
@@ -181,7 +166,7 @@ object DocCTR {
     val neg_data = data.where("label = 0")
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("ratio", ratio)
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 100))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 20))
     println("pos_data",dataFrame.where("label = 1").count())
     println("neg_data",dataFrame.where("label = 0").count())
     dataFrame

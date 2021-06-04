@@ -31,7 +31,8 @@ object DocVecCTR {
     "click_14","click_30","click_90","wilson_ctr_1","wilson_ctr_3","wilson_ctr_7","wilson_ctr_14","wilson_ctr_30" )
 
   def main(args: Array[String]): Unit = {
-    val dt = TimeUtils.changFormat(args(0))
+    val dts = args(0)
+    val dt = TimeUtils.changFormat(dts)
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport().getOrCreate()
@@ -56,10 +57,10 @@ object DocVecCTR {
 
     registUDF(spark, docVecMap,doc2Int,intToVector)
     println("*******************************************************")
-    val dt7 = TimeUtils.addDate(dt, -6)
-    val dt14 = TimeUtils.addDate(dt, -13)
-    val dt21 = TimeUtils.addDate(dt, -20)
-    val dt28 = TimeUtils.addDate(dt, -27)
+    val dt7 = TimeUtils.addDate(dts, -6)
+    val dt14 = TimeUtils.addDate(dts, -13)
+    val dt21 = TimeUtils.addDate(dts, -20)
+    val dt28 = TimeUtils.addDate(dts, -27)
     val sqltxt =
       s"""
          |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature
@@ -148,11 +149,13 @@ object DocVecCTR {
     val trainAuc= evaluator.evaluate(predictTrain)
     println(" train auc:" + trainAuc)
 
-    val test_dt = TimeUtils.addDate(dt, -10)
-    val testData = spark.sql(
-      s"""
-         |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '${test_dt}' and title_length is not null
-       """.stripMargin)
+    val test_dt = TimeUtils.addDate(dts, -10)
+
+    val sql = s"""
+                 |select *, docVec2(doc_id) as docVec from persona.yylive_dws_user_docid_ctr_feature  WHERE dt = '${test_dt}' and title_length is not null
+       """.stripMargin
+    println("test_sql:", sql)
+    val testData = spark.sql(sql)
 
     val predictTest = model.transform(testData)
     predictTest.select("label", "prediction")
