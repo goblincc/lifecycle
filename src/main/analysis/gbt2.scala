@@ -1,14 +1,12 @@
 package analysis
 
-import org.apache.spark.ml.{Pipeline, PipelineStage}
-import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier, LogisticRegression, LogisticRegressionModel}
+import analysis.gbtTrain.getIndicators
+import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
-import org.apache.spark.ml.feature.{OneHotEncoderEstimator, StringIndexer, VectorAssembler}
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.ml.feature.RFormula
+import org.apache.spark.sql.{DataFrame, SparkSession}
 
-import scala.collection.mutable.ListBuffer
-
-object gbtTrain {
+object gbt2 {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
@@ -18,7 +16,7 @@ object gbtTrain {
     val data = spark.sql(
       s"""
          select
-         |if(talk_dr > 137, 1, 0) as label,
+         |if(talk_dr > 137, 1, 0) as labels,
          |hdid,
          |bd_sex,
          |bd_age,
@@ -48,71 +46,55 @@ object gbtTrain {
        """.stripMargin)
     data.show(20, false)
 
-    println("pos:"+ data.where("label = 1").count())
-    println("neg:"+ data.where("label = 0").count())
+//    println("pos:"+ data.where("label = 1").count())
+//    println("neg:"+ data.where("label = 0").count())
 
-    val splits = data.randomSplit(Array(0.7, 0.3), seed = 11L)
-    val training = splits(0).cache()
-    val test = splits(1)
-
-    val category_col = Array("bd_sex","bd_age","bd_consume", "bd_marriage", "bd_high_value", "bd_low_value","bd_sing",
-      "bd_dance", "bd_talk", "bd_outdoor",  "bd_game", "bd_sport"
-    )
-
-    val stagesArray = new ListBuffer[PipelineStage]()
-    val indexArray = new ListBuffer[String]()
-    val vecArray = new ListBuffer[String]()
-    for(cate <- category_col){
-      val indexer = new StringIndexer().setInputCol(cate).setOutputCol(s"${cate}Index")
-      indexArray.append(s"${cate}Index")
-      vecArray.append(s"${cate}Vec")
-      stagesArray.append(indexer)
-    }
-
-    val oneHotEncoder = new OneHotEncoderEstimator()
-      .setInputCols(indexArray.toArray)
-      .setOutputCols(vecArray.toArray)
-
-    stagesArray.append(oneHotEncoder)
-
-    val assemblerInputs = category_col.map(_ + "Vec")
-
-    val assembler = new VectorAssembler()
-      .setInputCols(assemblerInputs)
-      .setOutputCol("features")
+    val formula =
+      s"""
+         |labels ~ bd_sex + bd_age + bd_consume + bd_marriage + bd_high_value + bd_low_value + bd_sing +
+         |bd_dance + bd_talk + bd_outdoor + bd_game + bd_sport
+       """.stripMargin
+    val rformula = new RFormula()
+      .setFormula(formula)
+      .setFeaturesCol("features")
+      .setLabelCol("label")
+    val output = rformula.fit(data).transform(data)
+    println("rformula output:")
+    output.show(false)
 
     val trainer = new GBTClassifier()
       .setLabelCol("label")
       .setFeaturesCol("features")
 
-    stagesArray.append(assembler)
-    stagesArray.append(trainer)
+    val splits = output.randomSplit(Array(0.7, 0.3), seed = 11L)
+    val training = sampleData(splits(0))
+    println("train_pos:"+ training.where("label = 1.0").count())
+    println("train_neg:"+ training.where("label = 0.0").count())
+    val test = splits(1)
+    println("test_pos:"+ test.where("label = 1.0").count())
+    println("test_neg:"+ test.where("label = 0.0").count())
 
 
-    val pipeline = new Pipeline()
-      .setStages(stagesArray.toArray)
+    val model: GBTClassificationModel = trainer.fit(training)
 
-    // Train model. This also runs the indexers.
-    val model = pipeline.fit(training)
+    val traindf = model.transform(training)
+    traindf.show(30,false)
+    traindf.select("label", "prediction")
+      .createOrReplaceTempView("train")
+    getIndicators(spark, "train")
 
-    val predict = model.transform(test)
-    predict.show(30,false)
-    predict.select("label", "prediction")
+    val testdf = model.transform(test)
+    testdf.show(30,false)
+    testdf.select("label", "prediction")
       .createOrReplaceTempView("test")
     getIndicators(spark, "test")
 
     val evaluator = new BinaryClassificationEvaluator()
     evaluator.setMetricName("areaUnderROC")
-    val trainAuc= evaluator.evaluate(predict)
-    println(" test auc:" + trainAuc)
+    val testAuc= evaluator.evaluate(testdf)
+    println(" test auc:" + testAuc)
 
-    val stage = model.stages
-    println("length:", stage.length)
-
-    val gbtModel = stage(14).asInstanceOf[GBTClassificationModel]
-    val importances = gbtModel.featureImportances
-    println("importances:"+ importances)
-
+    println("importance:"+ model.featureImportances)
   }
 
   def getIndicators(sparkSession: SparkSession, table: String): Unit ={
@@ -142,5 +124,15 @@ object gbtTrain {
         """
     )
     matrix.show()
+  }
+
+  def sampleData(data: DataFrame): DataFrame ={
+    val pos_data = data.where("label = 1.0")
+    val neg_data = data.where("label = 0.0")
+    val ratio = pos_data.count() * 1.0/neg_data.count()
+    println("pos_data", pos_data.count())
+    println("neg_data", neg_data.count())
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 3))
+    dataFrame
   }
 }
