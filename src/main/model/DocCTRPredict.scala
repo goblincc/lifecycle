@@ -15,7 +15,8 @@ object DocCTRPredict {
   val modelPath = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
 
   def main(args: Array[String]): Unit = {
-    val dt = TimeUtils.changFormat(args(0))
+    val dts = args(0)
+    val dt = TimeUtils.changFormat(dts)
     val spark = SparkSession.builder().enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
 
@@ -26,6 +27,8 @@ object DocCTRPredict {
     print("sqlTxt:", sqlTxt)
 
     val data = spark.sql(sqlTxt)
+    val model_dt = TimeUtils.addDate(dts, -2)
+    println("model_dt:" + model_dt)
     val model = PipelineModel.read.load( modelPath + "/pipeDocCTR_" + dt )
     val predict = model.transform(data)
     predict.show(5, false)

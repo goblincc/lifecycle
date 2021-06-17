@@ -12,7 +12,8 @@ object GbtPredict {
   val modelPath = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
 
   def main(args: Array[String]): Unit = {
-    val dt = TimeUtils.changFormat(args(0))
+    val dts = args(0)
+    val dt = TimeUtils.changFormat(dts)
     val sparkSession = SparkSession.builder().enableHiveSupport().getOrCreate()
     sparkSession.sparkContext.setLogLevel("warn")
 
@@ -22,8 +23,9 @@ object GbtPredict {
        """.stripMargin
     print("sqlTxt:", sqlTxt)
     val data = sparkSession.sql(sqlTxt)
-    val model_dt = TimeUtils.addDate(dt, -10)
-    val model = PipelineModel.read.load( modelPath + "/pipeline_20210416" )
+    val model_dt = TimeUtils.addDate(dts, -46)
+    println("model_dt:" + model_dt)
+    val model = PipelineModel.read.load( modelPath + "/pipeline_" + model_dt )
 
     val predict = model.transform(data)
     predict.show(5, false)

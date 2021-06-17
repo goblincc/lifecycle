@@ -49,11 +49,17 @@ object gbt2 {
 //    println("pos:"+ data.where("label = 1").count())
 //    println("neg:"+ data.where("label = 0").count())
 
+//    val formula =
+//      s"""
+//         |labels ~ bd_sex + bd_age + bd_consume + bd_marriage + bd_high_value
+//       """.stripMargin
+
     val formula =
       s"""
          |labels ~ bd_sex + bd_age + bd_consume + bd_marriage + bd_high_value + bd_low_value + bd_sing +
          |bd_dance + bd_talk + bd_outdoor + bd_game + bd_sport
        """.stripMargin
+
     val rformula = new RFormula()
       .setFormula(formula)
       .setFeaturesCol("features")
@@ -65,6 +71,9 @@ object gbt2 {
     val trainer = new GBTClassifier()
       .setLabelCol("label")
       .setFeaturesCol("features")
+      .setMaxIter(100)
+      .setMaxDepth(3)
+      .setStepSize(1)
 
     val splits = output.randomSplit(Array(0.7, 0.3), seed = 11L)
     val training = sampleData(splits(0))

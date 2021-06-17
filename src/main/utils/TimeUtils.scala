@@ -49,8 +49,7 @@ object TimeUtils {
     }
 
   def main(args: Array[String]): Unit = {
-    println(addDate("20210602", -10))
+    println(addDate("20210615", -46))
     println(changFormat("20210508"))
-    println(1528783 * 1.0/481873671)
   }
 }

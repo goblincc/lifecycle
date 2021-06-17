@@ -72,7 +72,7 @@ object GbdtTrain {
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
-      .setK(70)
+      .setK(50)
       println("pca len:" + pca.getK)
 
     val trainer = new GBTClassifier()
@@ -105,7 +105,7 @@ object GbdtTrain {
     val model = pipeline.fit(data)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
-    model.save(output + "/pipeline_" + dt )
+    model.write.overwrite().save(output + "/pipeline_" + dt1 )
 
     println("model.stages lens:" + model.stages.length)
 
@@ -216,9 +216,14 @@ object GbdtTrain {
       println("layerSampleData:" + sqlText)
       val allData = sparkSession.sql(sqlText)
       val data = allData.sample(false, 0.5)
-      println("pos_num:" + data.where("label = 1").count())
-      println("neg_num:" + data.where("label = 0").count())
-      data
+      val pos_data = data.where("label = 1")
+      val neg_data = data.where("label = 0")
+      val ratio = pos_data.count() * 1.0/neg_data.count()
+      println("ratio", ratio)
+      val dataFrame = pos_data.union(neg_data.sample(false, ratio * 0.8))
+      println("pos_data",dataFrame.where("label = 1").count())
+      println("neg_data",dataFrame.where("label = 0").count())
+      dataFrame
   }
 
   def getTestData(sparkSession: SparkSession, dt: String): DataFrame = {
