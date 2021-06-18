@@ -70,11 +70,12 @@ object DocCTR {
     val assembler = new VectorAssembler()
       .setInputCols(assemblerInputs)
       .setOutputCol("features")
+      .setHandleInvalid("skip")
 
     val pca = new PCA()
       .setInputCol("features")
       .setOutputCol("pcaFeatures")
-      .setK(70)
+      .setK(60)
     println("pca len:" + pca.getK)
 
     val trainer = new GBTClassifier()
