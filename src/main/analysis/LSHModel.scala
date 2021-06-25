@@ -45,8 +45,8 @@ object LSHModel {
          |FROM
          |  (SELECT *
          |   FROM persona.yylive_dws_profit_user_retain_feature
-         |   WHERE dt >= '2021-05-08'
-         |     AND dt <= '2021-06-02' and mate_id is not null) AS a
+         |   WHERE dt >= '2021-05-16'
+         |     AND dt <= '2021-06-16' and mate_id is not null) AS a
          |LEFT JOIN
          |  (SELECT sjp
          |   FROM persona.yylive_dws_user_sjp_rank
@@ -59,7 +59,7 @@ object LSHModel {
          |  (SELECT hdid,
          |          applist
          |   FROM persona.yylive_dwd_applist_text
-         |   WHERE dt="2021-06-03"
+         |   WHERE dt="2021-06-16"
          |     AND TYPE=3) AS d ON a.hdid = d.hdid
        """.stripMargin
 
@@ -68,6 +68,7 @@ object LSHModel {
     val num_feature = Array("start_cnt_d1","start_cnt_d3", "start_cnt_d7", "active_days_d1", "active_days_d3", "active_days_d3",
       "active_days_d7", "total_watch_dr_d1", "total_watch_dr_d3","total_watch_dr_d7", "consume_cnt_d1",
       "consume_cnt_d3", "consume_cnt_d7")
+
 
     val formula =
       s"""
@@ -101,9 +102,17 @@ object LSHModel {
 
     val assembler = new VectorAssembler()
       .setInputCols(Array("catVec", "appVec") ++ num_feature)
+      .setOutputCol("assemble")
+
+    val assembleData = assembler.transform(rescaledData)
+
+    val scaler = new MinMaxScaler()
+      .setInputCol("assemble")
       .setOutputCol("features")
 
-    val output = assembler.transform(rescaledData)
+    val scalerModel = scaler.fit(assembleData)
+    val output = scalerModel.transform(assembleData)
+
     import spark.implicits._
     val meanData: DataFrame = output.groupBy($"mate_id").agg(Summarizer.mean($"features").alias("means"))
 
@@ -123,19 +132,23 @@ object LSHModel {
 
     val candidate_sql =
       s"""
-         |SELECT mate_id
+         |select mate_id from (
+         |SELECT a.mate_id,
+         |       row_number() over (partition BY 1 ORDER BY count(distinct hdid) desc) AS rank
          |FROM
          |  (SELECT mate_id,
-         |          row_number() over (partition BY 1
-         |                             ORDER BY count(*) DESC) AS rank
+         |          hdid
+         |   FROM persona.yylive_dws_profit_user_retain_feature) AS a
+         |LEFT JOIN
+         |  (SELECT mate_id,
+         |          count(DISTINCT hdid) num
          |   FROM persona.yylive_dws_profit_user_retain_feature
-         |   WHERE dt >= '2021-05-08'
-         |     AND dt <= '2021-06-02'
-         |     AND mate_id IS NOT NULL
-         |     AND (is_low_cost_retain IS NULL
-         |          OR is_profit_retain IS NULL)
-         |   GROUP BY mate_id) AS a
-         |WHERE rank <= 30
+         |   WHERE dt >= '2021-05-16'
+         |     AND dt <= '2021-06-16' and (is_low_cost_retain IS NOT NULL
+         |          OR is_profit_retain IS NOT NULL)
+         |   GROUP BY mate_id) AS b ON a.mate_id = b.mate_id
+         |WHERE b.mate_id IS NULL and a.mate_id is not null GROUP BY a.mate_id
+         |) as a where rank <= 30
        """.stripMargin
     val candidates = spark.sql(candidate_sql)
     val candidate = candidates.join(meanData,"mate_id").select("mate_id", "means")
