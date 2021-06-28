@@ -115,6 +115,12 @@ object LSHModel {
 
     import spark.implicits._
     val meanData: DataFrame = output.groupBy($"mate_id").agg(Summarizer.mean($"features").alias("means"))
+    meanData.createOrReplaceTempView("meanData_db")
+    spark.sql(
+      s"""
+         |insert overwrite table persona.yylive_quli_mean_feature partition(dt='2021-06-01')
+         |	select mate_id, means from meanData_db
+       """.stripMargin)
 
     val brp = new BucketedRandomProjectionLSH()
       .setBucketLength(0.2)
