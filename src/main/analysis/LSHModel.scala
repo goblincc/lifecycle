@@ -114,6 +114,10 @@ object LSHModel {
     val output = scalerModel.transform(assembleData)
 
     import spark.implicits._
+
+    val targetUser = output.where("is_low_cost_retain = 1 or is_profit_retain = 1")
+                      .agg(Summarizer.mean($"features").alias("means"))
+
     val meanData: DataFrame = output.groupBy($"mate_id").agg(Summarizer.mean($"features").alias("means"))
     meanData.createOrReplaceTempView("meanData_db")
     spark.sql(
@@ -154,7 +158,7 @@ object LSHModel {
          |          OR is_profit_retain IS NOT NULL)
          |   GROUP BY mate_id) AS b ON a.mate_id = b.mate_id
          |WHERE b.mate_id IS NULL and a.mate_id is not null GROUP BY a.mate_id
-         |) as a where rank <= 30
+         |) as a where rank <= 50
        """.stripMargin
     val candidates = spark.sql(candidate_sql)
     val candidate = candidates.join(meanData,"mate_id").select("mate_id", "means")
@@ -172,6 +176,19 @@ object LSHModel {
          |insert overwrite table persona.yylive_quli_result_day partition(dt='2021-06-01')
          |	select idA,idB,dist from result_db
        """.stripMargin)
+
+    val result2 = model.approxSimilarityJoin(candidate, targetUser, 100000, "EuclideanDistance")
+      .select(col("datasetA.mate_id").alias("idA"),
+        col("EuclideanDistance").alias("dist"))
+
+    result2.createOrReplaceTempView("user_db")
+    spark.sql(
+      s"""
+         |insert overwrite table persona.yylive_quli_result_user_target partition(dt='2021-06-01')
+         |	select idA, dist from user_db
+       """.stripMargin)
+
+
     spark.close()
   }
 
