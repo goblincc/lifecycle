@@ -8,11 +8,14 @@ import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import utils.ModelUtils.getIndicators
+import utils.TimeUtils
 
 import scala.collection.mutable.ListBuffer
 
 object gbtTrain_active {
   def main(args: Array[String]): Unit = {
+    val dts = args(0)
+    val dt = TimeUtils.changFormat(dts)
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport().getOrCreate()
@@ -20,23 +23,67 @@ object gbtTrain_active {
 
     val sqlTxt =
       s"""
-         |select *,
+         |select a.*,
+         |if(event_act_list_d4_d7 is null, '', event_act_list_d4_d7 ) as event_act_list_d4_d7,
+         |if(event_act_list_d8_d14 is null, '', event_act_list_d8_d14) as event_act_list_d8_d14,
+         |if(event_act_list_d15_d30 is null, '', event_act_list_d15_d30) as event_act_list_d15_d30
+         |from (
+         |select
+         |hdid,
+         |label,
+         |bd_consum,
+         |bd_marriage,
+         |bd_subconsum,
+         |bd_age,
+         |sex,
+         |city_level,
+         |sjp,
+         |sys,
+         |start_cnt_d7,
+         |start_cnt_d14,
+         |start_cnt_d30,
+         |active_days_d7,
+         |active_days_d14,
+         |active_days_d30,
+         |total_watch_dr_d7,
+         |total_watch_dr_d14,
+         |total_watch_dr_d30,
+         |consume_cnt_d7,
+         |consume_cnt_d14,
+         |consume_cnt_d30,
+         |push_click_cnt_d7,
+         |push_click_cnt_d14,
+         |push_click_cnt_d30,
          |if(applist is null, '', applist) as applists,
-         |if(age is null, 'other', age) as yy_age
-         |from persona.yylive_baoxiang_feature_day where dt >= '2021-05-13' and dt <= '2021-06-01' and is_current_active = 1 and last_active_dt >= date_add(dt, -3)
+         |cast(is_exposure_v2 as int) as is_exposure_v2,
+         |if(age is null, 'other', age) as yy_age,
+         |dt,
+         |row_number() over (partition BY hdid ORDER BY is_exposure_v2 desc, dt asc ) AS rank
+         |from persona.yylive_baoxiang_feature_day_v2  where dt >= '2021-05-13' and dt <= '2021-06-01'
+         |and last_active_dt <= date_add(dt, -3)) as a
+         |left join (
+         |SELECT hdid,
+         |       event_act_list_d4_d7,
+         |       event_act_list_d8_d14,
+         |       event_act_list_d15_d30,
+         |       dt
+         |FROM persona.yylive_dws_web_event_act_d
+         |WHERE dt >= '2021-05-13' and dt <= '2021-06-01') as b
+         |on a.hdid = b.hdid and a.dt = b.dt where rank = 1
        """.stripMargin
-    val datas = spark.sql(sqlTxt)
-    val data = sampleDatas(datas)
-    val num_feature = Array("start_cnt_d1","start_cnt_d3", "start_cnt_d7","start_cnt_d14","start_cnt_d30", "active_days_d1", "active_days_d3", "active_days_d7",
-      "active_days_d14","active_days_d30", "total_watch_dr_d1", "total_watch_dr_d3", "total_watch_dr_d7", "total_watch_dr_d14","total_watch_dr_d30",
-      "consume_cnt_d1","consume_cnt_d3", "consume_cnt_d7","consume_cnt_d14", "consume_cnt_d30", "push_click_cnt_d1","push_click_cnt_d3","push_click_cnt_d7",
+    val datas = spark.sql(sqlTxt).repartition(500).cache()
+    val data = sampleDatas(datas, spark)
+
+    val num_feature = Array("start_cnt_d7","start_cnt_d14","start_cnt_d30", "active_days_d7",
+      "active_days_d14","active_days_d30", "total_watch_dr_d7", "total_watch_dr_d14","total_watch_dr_d30",
+      "consume_cnt_d7","consume_cnt_d14", "consume_cnt_d30","push_click_cnt_d7",
       "push_click_cnt_d14", "push_click_cnt_d30")
 
     val stagesArray = new ListBuffer[PipelineStage]()
 
     val formula =
       s"""
-         |label ~ sex + yy_age + city_level + sjp + sys + is_exposure_v2
+         |label ~ sex + yy_age + city_level + sjp + sys + bd_consum + bd_marriage + bd_subconsum + bd_age
        """.stripMargin
 
     val rformula = new RFormula()
@@ -47,29 +94,38 @@ object gbtTrain_active {
 
     stagesArray.append(rformula)
 
-    val tokenizer = new RegexTokenizer()
-      .setInputCol("applists")
-      .setOutputCol("words")
-      .setPattern("\\|")
-    stagesArray.append(tokenizer)
-
-    val hashingTF = new HashingTF()
-      .setInputCol("words").setOutputCol("rawFeatures").setNumFeatures(10)
-    stagesArray.append(hashingTF)
-
-    val idf = new IDF().setInputCol("rawFeatures").setOutputCol("appVec")
-    stagesArray.append(idf)
+    tf_idf(stagesArray, "applists", 10)
+    tf_idf(stagesArray, "event_act_list_d4_d7", 10)
+    tf_idf(stagesArray, "event_act_list_d8_d14", 12)
+    tf_idf(stagesArray, "event_act_list_d15_d30", 14)
 
     val assembler = new VectorAssembler()
-      .setInputCols(Array("catVec", "appVec") ++ num_feature)
+      .setInputCols(Array("catVec", "applists_vec") ++ num_feature)
       .setOutputCol("assemble")
 
     stagesArray.append(assembler)
 
+    val pca = new PCA()
+      .setInputCol("assemble")
+      .setOutputCol("pcaFeatures")
+      .setK(40)
+    stagesArray.append(pca)
+
+    val encoder = new OneHotEncoderEstimator()
+      .setInputCols(Array("is_exposure_v2"))
+      .setOutputCols(Array("is_exposure_v2_vec"))
+    stagesArray.append(encoder)
+
+    val assemblerAll = new VectorAssembler()
+      .setInputCols(Array("assemble", "is_exposure_v2_vec") ++ num_feature)
+      .setOutputCol("assembleAll")
+
+    stagesArray.append(assemblerAll)
+
     val trainer = new GBTClassifier()
       .setLabelCol("label")
-      .setFeaturesCol("assemble")
-      .setMaxDepth(6)
+      .setFeaturesCol("assembleAll")
+      .setMaxDepth(4)
       .setMaxIter(20)
 
     stagesArray.append(trainer)
@@ -80,9 +136,9 @@ object gbtTrain_active {
     val model = pipeline.fit(data)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/pipe"
-    model.write.overwrite().save(output + "/pipelineActive_2021-06-15" )
+    model.write.overwrite().save(output + "/pipelineActive_" + dt )
 
-    val predictTrain = model.transform(data)
+    val predictTrain = model.transform(data).cache()
     predictTrain.show(10, false)
     predictTrain.select("label", "prediction")
       .createOrReplaceTempView("trained")
@@ -94,10 +150,51 @@ object gbtTrain_active {
     println(" train auc:" + trainAuc)
 
     val sql = s"""
-                 |select *,
+                 |select a.*,
+                 |if(event_act_list_d4_d7 is null, '', event_act_list_d4_d7 ) as event_act_list_d4_d7,
+                 |if(event_act_list_d8_d14 is null, '', event_act_list_d8_d14) as event_act_list_d8_d14,
+                 |if(event_act_list_d15_d30 is null, '', event_act_list_d15_d30) as event_act_list_d15_d30
+                 |from (
+                 |select
+                 |hdid,
+                 |label,
+                 |bd_consum,
+                 |bd_marriage,
+                 |bd_subconsum,
+                 |bd_age,
+                 |sex,
+                 |city_level,
+                 |sjp,
+                 |sys,
+                 |start_cnt_d7,
+                 |start_cnt_d14,
+                 |start_cnt_d30,
+                 |active_days_d7,
+                 |active_days_d14,
+                 |active_days_d30,
+                 |total_watch_dr_d7,
+                 |total_watch_dr_d14,
+                 |total_watch_dr_d30,
+                 |consume_cnt_d7,
+                 |consume_cnt_d14,
+                 |consume_cnt_d30,
+                 |push_click_cnt_d7,
+                 |push_click_cnt_d14,
+                 |push_click_cnt_d30,
+                 |cast(is_exposure_v2 as int) as is_exposure_v2,
                  |if(applist is null, '', applist) as applists,
-                 |if(age is null, 'other', age) as yy_age
-                 |from persona.yylive_baoxiang_feature_day where dt = '2021-06-03'
+                 |if(age is null, 'other', age) as yy_age,
+                 |dt
+                 |from persona.yylive_baoxiang_feature_day_v2 where dt = '2021-06-03') as a
+                 |left join (
+                 |SELECT hdid,
+                 |       event_act_list_d4_d7,
+                 |       event_act_list_d8_d14,
+                 |       event_act_list_d15_d30,
+                 |       dt
+                 |FROM persona.yylive_dws_web_event_act_d
+                 |WHERE dt = '2021-06-03') as b
+                 |on a.hdid = b.hdid and a.dt = b.dt
        """.stripMargin
     println("test_sql:", sql)
     val testData = spark.sql(sql)
@@ -113,21 +210,45 @@ object gbtTrain_active {
 
   }
 
-  def sampleDatas(data: DataFrame): DataFrame ={
+  def sampleDatas(data: DataFrame, spark: SparkSession): DataFrame ={
     val pos_data = data.where("is_exposure_v2 = 1 and label = 1")
     val pos_data_2 = data.where("is_exposure_v2 = 0 and label = 1")
-    val ratio = pos_data.count() * 1.0/pos_data_2.count()
-    println("ratio", ratio)
+//    val ratio1 = pos_data.count() * 1.0/pos_data_2.count()
+    val ratio1 = 0.0678
+    println("ratio1", ratio1)
 
-    val pos_data_all = pos_data.union(pos_data_2.sample(false, ratio))
-    val neg_data = data.where("label = 0")
-    val ratio2 = pos_data_all.count() * 1.0/neg_data.count()
+    val pos_data_all = pos_data.union(pos_data_2.sample(false, ratio1 * 0.6))
+
+    val neg_data = data.where("is_exposure_v2 = 1 and label = 0")
+    val neg_data_2 = data.where("is_exposure_v2 = 0 and label = 0")
+//    val ratio2 = neg_data.count() * 1.0/neg_data_2.count()
+    val ratio2 = 0.0166
     println("ratio2", ratio2)
 
-    val dataFrame = pos_data_all.union(neg_data.sample(false, ratio2 * 10))
-    println("pos_data",dataFrame.where("label = 1").count())
-    println("neg_data",dataFrame.where("label = 0").count())
+    val neg_data_all = neg_data.union(neg_data_2.sample(false, ratio2 * 0.6))
+
+    val dataFrame = pos_data_all.union(neg_data_all)
+    dataFrame.createOrReplaceTempView("sample")
+    spark.sql("select label, is_exposure_v2, count(*) as cnt from sample group by label, is_exposure_v2").show(false)
+//    println("pos_data",dataFrame.where("label = 1").count())
+//    println("neg_data",dataFrame.where("label = 0").count())
     dataFrame
   }
 
+
+  def tf_idf(stagesArray:ListBuffer[PipelineStage], input: String, numFeatures: Int): Unit ={
+    val tokenizer = new RegexTokenizer()
+      .setInputCol(input)
+      .setOutputCol(input + "_token")
+      .setPattern("\\|")
+    stagesArray.append(tokenizer)
+
+    val hashingTF = new HashingTF()
+      .setInputCol(input + "_token").setOutputCol(input + "_tf").setNumFeatures(numFeatures)
+    stagesArray.append(hashingTF)
+
+    val idf = new IDF().setInputCol(input + "_tf").setOutputCol(input + "_vec")
+    stagesArray.append(idf)
+
+  }
 }
