@@ -83,7 +83,7 @@ object gbtTrain_active {
 
     val formula =
       s"""
-         |label ~ sex + yy_age + city_level + sjp + sys + bd_consum + bd_marriage + bd_subconsum + bd_age
+         |label ~ sex + yy_age + city_level + sjp + sys
        """.stripMargin
 
     val rformula = new RFormula()
@@ -108,7 +108,7 @@ object gbtTrain_active {
     val pca = new PCA()
       .setInputCol("assemble")
       .setOutputCol("pcaFeatures")
-      .setK(40)
+      .setK(15)
     stagesArray.append(pca)
 
     val encoder = new OneHotEncoderEstimator()
@@ -117,7 +117,7 @@ object gbtTrain_active {
     stagesArray.append(encoder)
 
     val assemblerAll = new VectorAssembler()
-      .setInputCols(Array("assemble", "is_exposure_v2_vec") ++ num_feature)
+      .setInputCols(Array("pcaFeatures", "is_exposure_v2_vec") ++ num_feature)
       .setOutputCol("assembleAll")
 
     stagesArray.append(assemblerAll)
@@ -125,7 +125,7 @@ object gbtTrain_active {
     val trainer = new GBTClassifier()
       .setLabelCol("label")
       .setFeaturesCol("assembleAll")
-      .setMaxDepth(4)
+      .setMaxDepth(3)
       .setMaxIter(20)
 
     stagesArray.append(trainer)
@@ -217,7 +217,7 @@ object gbtTrain_active {
     val ratio1 = 0.0678
     println("ratio1", ratio1)
 
-    val pos_data_all = pos_data.union(pos_data_2.sample(false, ratio1 * 0.6))
+    val pos_data_all = pos_data.union(pos_data_2.sample(false, ratio1 * 0.5))
 
     val neg_data = data.where("is_exposure_v2 = 1 and label = 0")
     val neg_data_2 = data.where("is_exposure_v2 = 0 and label = 0")
@@ -225,13 +225,12 @@ object gbtTrain_active {
     val ratio2 = 0.0166
     println("ratio2", ratio2)
 
-    val neg_data_all = neg_data.union(neg_data_2.sample(false, ratio2 * 0.6))
+    val neg_data_all = neg_data.union(neg_data_2.sample(false, ratio2 * 0.5))
 
     val dataFrame = pos_data_all.union(neg_data_all)
     dataFrame.createOrReplaceTempView("sample")
     spark.sql("select label, is_exposure_v2, count(*) as cnt from sample group by label, is_exposure_v2").show(false)
-//    println("pos_data",dataFrame.where("label = 1").count())
-//    println("neg_data",dataFrame.where("label = 0").count())
+
     dataFrame
   }
 

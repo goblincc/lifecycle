@@ -51,7 +51,7 @@ object gbtPredict_active {
          |if(applist is null, '', applist) as applists,
          |if(age is null, 'other', age) as yy_age,
          |1 as is_exposure_v2
-         |from persona.yylive_baoxiang_feature_day_predict where dt = '2021-07-13') as a
+         |from persona.yylive_baoxiang_feature_day_predict where dt = '2021-07-14') as a
          |left join (
          |SELECT hdid,
          |       event_act_list_d4_d7,
@@ -59,7 +59,7 @@ object gbtPredict_active {
          |       event_act_list_d15_d30,
          |       dt
          |FROM persona.yylive_dws_web_event_act_d
-         |WHERE dt = '2021-07-13') as b
+         |WHERE dt = '2021-07-14') as b
          |on a.hdid = b.hdid
        """.stripMargin
     print("sqlTxt:", sqlTxt)
@@ -102,7 +102,7 @@ object gbtPredict_active {
          |if(applist is null, '', applist) as applists,
          |if(age is null, 'other', age) as yy_age,
          |0 as is_exposure_v2
-         |from persona.yylive_baoxiang_feature_day_predict where dt = '2021-07-13') as a
+         |from persona.yylive_baoxiang_feature_day_predict where dt = '2021-07-14') as a
          |left join (
          |SELECT hdid,
          |       event_act_list_d4_d7,
@@ -110,7 +110,7 @@ object gbtPredict_active {
          |       event_act_list_d15_d30,
          |       dt
          |FROM persona.yylive_dws_web_event_act_d
-         |WHERE dt = '2021-07-13') as b
+         |WHERE dt = '2021-07-14') as b
          |on a.hdid = b.hdid
        """.stripMargin
     print("sqlTxt2:", sqlTxt2)
