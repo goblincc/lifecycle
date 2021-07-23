@@ -83,7 +83,7 @@ object gbtTrain_active {
 
     val formula =
       s"""
-         |label ~ sex + yy_age + city_level + sjp + sys
+         |label ~ sex + yy_age + city_level + sjp + sys + bd_consum + bd_marriage + bd_subconsum + bd_age
        """.stripMargin
 
     val rformula = new RFormula()
@@ -108,7 +108,7 @@ object gbtTrain_active {
     val pca = new PCA()
       .setInputCol("assemble")
       .setOutputCol("pcaFeatures")
-      .setK(15)
+      .setK(20)
     stagesArray.append(pca)
 
     val encoder = new OneHotEncoderEstimator()
@@ -117,7 +117,7 @@ object gbtTrain_active {
     stagesArray.append(encoder)
 
     val assemblerAll = new VectorAssembler()
-      .setInputCols(Array("pcaFeatures", "is_exposure_v2_vec") ++ num_feature)
+      .setInputCols(Array("pcaFeatures", "is_exposure_v2_vec"))
       .setOutputCol("assembleAll")
 
     stagesArray.append(assemblerAll)
@@ -225,7 +225,7 @@ object gbtTrain_active {
     val ratio2 = 0.0166
     println("ratio2", ratio2)
 
-    val neg_data_all = neg_data.union(neg_data_2.sample(false, ratio2 * 0.5))
+    val neg_data_all = neg_data.sample(false, 0.3).union(neg_data_2.sample(false, ratio2 * 0.25))
 
     val dataFrame = pos_data_all.union(neg_data_all)
     dataFrame.createOrReplaceTempView("sample")
