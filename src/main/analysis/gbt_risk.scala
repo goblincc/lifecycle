@@ -3,7 +3,9 @@ package analysis
 import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.ml.{Pipeline, PipelineStage}
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
@@ -98,6 +100,12 @@ object gbt_risk {
       .createOrReplaceTempView("testdf")
     getIndicators(spark, "testdf")
 
+    val dataframe = testdf.select("label", "prediction", "probability").rdd.map(p => {
+      (p.getAs[Int](0), p.getAs[Double](1), p.getAs[DenseVector](2)(1))
+    }).toDF("label", "prediction", "probability")
+    dataframe.show(5, false)
+    aucCal(dataframe)
+
     val evaluator = new BinaryClassificationEvaluator()
     evaluator.setMetricName("areaUnderROC")
     val testAuc= evaluator.evaluate(testdf)
@@ -144,5 +152,20 @@ object gbt_risk {
     println("neg_data", neg_data.count())
     val dataFrame = pos_data.union(neg_data.sample(false, ratio * 50))
     dataFrame
+  }
+
+  def aucCal(df: DataFrame):Double= {
+    val sort: RDD[((Int, Double, Double), Long)] = df.rdd.map(p => {
+      (p.getAs[Int](0), p.getAs[Double](1), p.getAs[Double](2))
+    }).sortBy(_._3, ascending = true).zipWithIndex()
+    //计算正样本的ranker之和
+    val posSum = sort.filter(_._1._1 == 1).map(_._2).sum()
+    //计算正样本数量M和负样本数量N
+    val M = sort.filter(_._1._1 == 1).count
+    val N = sort.filter(_._1._1 == 0).count
+    //计算公式
+    val auc = (posSum - ((M - 1.0) * M) / 2) / (M * N)
+    println("aucCal:" + auc)
+    auc
   }
 }
