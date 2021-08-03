@@ -1,8 +1,9 @@
 package analysis
 
+import analysis.gbtTrain_active.tf_idf
 import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
-import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.feature.{HashingTF, IDF, RegexTokenizer, VectorAssembler}
 import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.rdd.RDD
@@ -15,64 +16,74 @@ object gbt_risk {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
-      .master("local[*]")
-      .enableHiveSupport().getOrCreate()
+      .enableHiveSupport()
+      .getOrCreate()
     spark.sparkContext.setLogLevel("error")
 
-    val customSchema = StructType(Array(
-      StructField("label", IntegerType, true),
-      StructField("dtcnt", IntegerType, true),
-      StructField("all_dt", IntegerType, true),
-      StructField("amount", IntegerType, true),
-      StructField("amount_avg", DoubleType, true),
-      StructField("chid_cnt", IntegerType, true),
-      StructField("paymethod_cnt", IntegerType, true),
-      StructField("userip_cnt", IntegerType, true),
-      StructField("max_cnt_dt", IntegerType, true),
-      StructField("avg_cnt_dt", DoubleType, true))
-    )
-
-    val data = spark
-      .read
-      .format("csv")
-      .option("header","true")
-      .option("multiLine", true)
-//      .schema(customSchema)
-      .load("./data/risk.csv")
-
-    data.createOrReplaceTempView("df_table")
     val df = spark.sql(
       s"""
-         |select
-         |cast(label as int) as label,
-         |cast(dtcnt as int) as dtcnt,
-         |cast(all_dt as int) as all_dt,
-         |cast(amount as int) as amount,
-         |cast(amount_avg as float) as amount_avg,
-         |cast(chid_cnt as int) as chid_cnt,
-         |cast(paymethod_cnt as int) as paymethod_cnt,
-         |cast(userip_cnt as int) as userip_cnt,
-         |cast(max_cnt_dt as int) as max_cnt_dt,
-         |cast(avg_cnt_dt as float) as avg_cnt_dt
-         |from df_table
+         |SELECT a.*,
+         |		size(split(device_cnt_list, ',')) as device_cnt,
+         |		size(split(ip_cnt_list, ',')) as ip_cnt,
+         |    if(b.uid IS NULL, 0, 1) AS label
+         |   FROM
+         |     (SELECT *
+         |      FROM persona.yylive_uid_feature_info
+         |      WHERE dt='2021-08-02'
+         |  ) AS a
+         |   LEFT JOIN
+         |     (SELECT uid
+         |      FROM persona.yylive_risk_rule_day_all
+         |      WHERE dt = '2021-08-02'
+         |      UNION SELECT uid
+         |      FROM persona.yylive_ods_blacklist_d
+         |      WHERE dt='20210802') AS b ON a.uid = b.uid
        """.stripMargin)
+
 
     val splits = df.randomSplit(Array(0.7, 0.3), seed = 11L)
     val training = sampleData(splits(0))
+    training.show(10, false)
     println("train_pos:"+ training.where("label = 1.0").count())
     println("train_neg:"+ training.where("label = 0.0").count())
     val test = splits(1)
     println("test_pos:"+ test.where("label = 1.0").count())
     println("test_neg:"+ test.where("label = 0.0").count())
 
-    val num_feature = Array("dtcnt", "all_dt", "amount", "amount_avg", "chid_cnt", "paymethod_cnt", "userip_cnt", "max_cnt_dt", "avg_cnt_dt")
+    val num_features = Array(
+      "cnt_30","cnt_60","cnt_90",
+      "day_30","day_60","day_90",
+      "sid_30","sid_60","sid_90",
+      "sid_all_30","sid_all_60","sid_all_90",
+      "avg_sid_cnt_30","avg_sid_cnt_60","avg_sid_cnt_90",
+      "avg_sid_30","avg_sid_60","avg_sid_90","sub_cnt",
+      "cont_d_30","cont_d_60","cont_d_90","cont_all_30",
+      "cont_all_60","cont_all_90","avg_cont_30",
+      "avg_cont_60","avg_cont_90","gift_cnt_30",
+      "gift_cnt_60","gift_cnt_90","sum_30",
+      "sum_60","sum_90","stddev_30","stddev_60","stddev_90",
+      "avg_30","avg_60","avg_90","ip_city","bd_sex",
+      "bd_age","bd_consum","bd_marriage","bd_subconsum","dtcnt_30",
+      "dtcnt_60","dtcnt_90","alldt_30","alldt_60",
+      "alldt_90","amount_30","amount_60","amount_90",
+      "avg_amount_30","avg_amount_60","avg_amount_90",
+      "stddev_amount_30","stddev_amount_60","stddev_amount_90",
+      "chid_30","chid_60","chid_90","paymethod_30","paymethod_60",
+      "paymethod_90","userip_30","userip_60",
+      "userip_90","max_cnt_30","max_cnt_60","max_cnt_90",
+      "avg_cnt_30","avg_cnt_60","avg_cnt_90",
+      "no_active_30","no_active_60","no_active_90",
+      "no_active_pay_30","no_active_pay_60","no_active_pay_90",
+      "device_cnt", "ip_cnt"
+    )
 
     val stagesArray = new ListBuffer[PipelineStage]()
 
+    tf_idf_stage(stagesArray, "events_list_90", 20)
+
     val assembler = new VectorAssembler()
-      .setInputCols(num_feature)
+      .setInputCols(num_features)
       .setOutputCol("assemble")
-      .setHandleInvalid("skip")
     stagesArray.append(assembler)
 
     val trainer = new GBTClassifier()
@@ -80,7 +91,6 @@ object gbt_risk {
       .setFeaturesCol("assemble")
       .setMaxIter(20)
     stagesArray.append(trainer)
-
 
     val pipeline = new Pipeline()
       .setStages(stagesArray.toArray)
@@ -100,18 +110,19 @@ object gbt_risk {
       .createOrReplaceTempView("testdf")
     getIndicators(spark, "testdf")
 
+    import spark.implicits._
     val dataframe = testdf.select("label", "prediction", "probability").rdd.map(p => {
       (p.getAs[Int](0), p.getAs[Double](1), p.getAs[DenseVector](2)(1))
     }).toDF("label", "prediction", "probability")
     dataframe.show(5, false)
-    aucCal(dataframe)
+//    aucCal(dataframe)
 
     val evaluator = new BinaryClassificationEvaluator()
     evaluator.setMetricName("areaUnderROC")
     val testAuc= evaluator.evaluate(testdf)
     println(" test auc:" + testAuc)
-    val gbtModel = model.stages(1).asInstanceOf[GBTClassificationModel]
-    println("importance:"+ gbtModel.featureImportances)
+//    val gbtModel = model.stages(1).asInstanceOf[GBTClassificationModel]
+//    println("importance:"+ gbtModel.featureImportances)
 
   }
 
@@ -167,5 +178,21 @@ object gbt_risk {
     val auc = (posSum - ((M - 1.0) * M) / 2) / (M * N)
     println("aucCal:" + auc)
     auc
+  }
+
+  def tf_idf_stage(stagesArray:ListBuffer[PipelineStage], input: String, numFeatures: Int): Unit ={
+    val tokenizer = new RegexTokenizer()
+      .setInputCol(input)
+      .setOutputCol(input + "_token")
+      .setPattern(",")
+    stagesArray.append(tokenizer)
+
+    val hashingTF = new HashingTF()
+      .setInputCol(input + "_token").setOutputCol(input + "_tf").setNumFeatures(numFeatures)
+    stagesArray.append(hashingTF)
+
+    val idf = new IDF().setInputCol(input + "_tf").setOutputCol(input + "_vec")
+    stagesArray.append(idf)
+
   }
 }

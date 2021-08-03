@@ -16,13 +16,15 @@ object DocCTRPredict {
 
   def main(args: Array[String]): Unit = {
     val dts = args(0)
+    val target_table = args(1)
+    val predict_table = args(2)
     val dt = TimeUtils.changFormat(dts)
     val spark = SparkSession.builder().enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("warn")
 
     val sqlTxt =
       s"""
-         |select * from persona.yylive_dws_user_docid_remain_predict  WHERE dt='${dt}'
+         |select * from ${target_table}  WHERE dt='${dt}'
        """.stripMargin
     print("sqlTxt:", sqlTxt)
 
@@ -32,11 +34,11 @@ object DocCTRPredict {
     val model = PipelineModel.read.load( modelPath + "/pipeDocCTR_" + dt )
     val predict = model.transform(data)
     predict.show(5, false)
-    saveData2hive(spark, dt, predict)
+    saveData2hive(spark, dt, predict, predict_table)
 
   }
 
-  def saveData2hive(spark:SparkSession, dt: String, dataFrame: DataFrame): Unit ={
+  def saveData2hive(spark:SparkSession, dt: String, dataFrame: DataFrame, predict_table: String): Unit ={
     val structFields = Array(
       StructField("hdid",StringType,true),
       StructField("docid",StringType,true),
@@ -56,7 +58,7 @@ object DocCTRPredict {
 
     spark.sql(
       s"""
-         |insert overwrite table persona.yylive_dws_user_doc_predict_info partition(dt='${dt}')
+         |insert overwrite table ${predict_table} partition(dt='${dt}')
          |	select * from tb_save
        """.stripMargin)
 
