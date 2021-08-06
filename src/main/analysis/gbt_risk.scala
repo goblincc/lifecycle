@@ -23,8 +23,6 @@ object gbt_risk {
     val df = spark.sql(
       s"""
          |SELECT a.*,
-         |		size(split(device_cnt_list, ',')) as device_cnt,
-         |		size(split(ip_cnt_list, ',')) as ip_cnt,
          |    if(b.uid IS NULL, 0, 1) AS label
          |   FROM
          |     (SELECT *
@@ -43,7 +41,6 @@ object gbt_risk {
 
     val splits = df.randomSplit(Array(0.7, 0.3), seed = 11L)
     val training = sampleData(splits(0))
-    training.show(10, false)
     println("train_pos:"+ training.where("label = 1.0").count())
     println("train_neg:"+ training.where("label = 0.0").count())
     val test = splits(1)
@@ -62,8 +59,7 @@ object gbt_risk {
       "avg_cont_60","avg_cont_90","gift_cnt_30",
       "gift_cnt_60","gift_cnt_90","sum_30",
       "sum_60","sum_90","stddev_30","stddev_60","stddev_90",
-      "avg_30","avg_60","avg_90","ip_city","bd_sex",
-      "bd_age","bd_consum","bd_marriage","bd_subconsum","dtcnt_30",
+      "avg_30","avg_60","avg_90","dtcnt_30",
       "dtcnt_60","dtcnt_90","alldt_30","alldt_60",
       "alldt_90","amount_30","amount_60","amount_90",
       "avg_amount_30","avg_amount_60","avg_amount_90",
@@ -74,16 +70,22 @@ object gbt_risk {
       "avg_cnt_30","avg_cnt_60","avg_cnt_90",
       "no_active_30","no_active_60","no_active_90",
       "no_active_pay_30","no_active_pay_60","no_active_pay_90",
-      "device_cnt", "ip_cnt"
+      "avg_amount", "stddev_amount", "max_cnt","avg_cnt","avg_delta_time",
+      "stddev_delta_time","avg_all_90","stddev_all_90","max_device_cnt",
+      "avg_device_cnt","stdev_device_cnt","max_IP_cnt","avg_IP_cnt","stdev_IP_cnt"
     )
 
     val stagesArray = new ListBuffer[PipelineStage]()
 
     tf_idf_stage(stagesArray, "events_list_90", 20)
+    tf_idf_stage(stagesArray, "events_list_60", 20)
+    tf_idf_stage(stagesArray, "events_list_30", 20)
+    tf_idf_stage(stagesArray, "statuscode_list", 10)
 
     val assembler = new VectorAssembler()
-      .setInputCols(num_features)
+      .setInputCols(Array("events_list_90_vec") ++ num_features)
       .setOutputCol("assemble")
+      .setHandleInvalid("skip")
     stagesArray.append(assembler)
 
     val trainer = new GBTClassifier()
@@ -98,14 +100,11 @@ object gbt_risk {
     val model = pipeline.fit(training)
 
     val traindf = model.transform(training)
-
-    traindf.show(10,false)
     traindf.select("label", "prediction")
       .createOrReplaceTempView("traindf")
     getIndicators(spark, "traindf")
 
     val testdf = model.transform(test)
-    testdf.show(10,false)
     testdf.select("label", "prediction")
       .createOrReplaceTempView("testdf")
     getIndicators(spark, "testdf")
@@ -114,15 +113,23 @@ object gbt_risk {
     val dataframe = testdf.select("label", "prediction", "probability").rdd.map(p => {
       (p.getAs[Int](0), p.getAs[Double](1), p.getAs[DenseVector](2)(1))
     }).toDF("label", "prediction", "probability")
-    dataframe.show(5, false)
 //    aucCal(dataframe)
+
+    //调整阈值
+    testdf.select("label", "prediction", "probability").rdd.map(p => {
+      val label = p.getAs[Int](0)
+      val prediction = if (p.getAs[DenseVector](2)(1) >= 0.7) 1.0 else 0.0
+      (label.toDouble, prediction)
+    }).toDF("label", "prediction")
+      .createOrReplaceTempView("testDF2")
+    getIndicators(spark, "testDF2")
 
     val evaluator = new BinaryClassificationEvaluator()
     evaluator.setMetricName("areaUnderROC")
     val testAuc= evaluator.evaluate(testdf)
     println(" test auc:" + testAuc)
-//    val gbtModel = model.stages(1).asInstanceOf[GBTClassificationModel]
-//    println("importance:"+ gbtModel.featureImportances)
+    val gbtModel = model.stages(13).asInstanceOf[GBTClassificationModel]
+    println("importance:"+ gbtModel.featureImportances)
 
   }
 
@@ -161,7 +168,7 @@ object gbt_risk {
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("pos_data", pos_data.count())
     println("neg_data", neg_data.count())
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 50))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 70))
     dataFrame
   }
 
