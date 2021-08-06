@@ -99,6 +99,9 @@ object gbt_risk {
 
     val model = pipeline.fit(training)
 
+    val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/risk"
+    model.write.overwrite().save(output + "/piperisk_20210802")
+
     val traindf = model.transform(training)
     traindf.select("label", "prediction")
       .createOrReplaceTempView("traindf")
