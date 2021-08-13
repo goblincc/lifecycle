@@ -3,7 +3,7 @@ package analysis
 import analysis.gbtTrain_active.tf_idf
 import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
-import org.apache.spark.ml.feature.{HashingTF, IDF, RegexTokenizer, VectorAssembler}
+import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.rdd.RDD
@@ -14,6 +14,7 @@ import scala.collection.mutable.ListBuffer
 
 object gbt_risk {
   def main(args: Array[String]): Unit = {
+
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport()
@@ -23,6 +24,14 @@ object gbt_risk {
     val df = spark.sql(
       s"""
          |SELECT a.*,
+         |    (cnt_30 + cnt_60 + cnt_90) as cnt_90_all,
+         |    (day_30 + day_60 + day_90) as day_90_all,
+         |    (sid_30 + sid_60 + sid_90) as sid_90_all,
+         |    (sid_all_30 + sid_all_60 + sid_all_90) as sid_all_90_dr,
+         |    (gift_cnt_30 + gift_cnt_60 + gift_cnt_90) as gift_cnt_90_all,
+         |    (sum_30 + sum_60 + sum_90) as sum_90_all,
+         |    (alldt_30 + alldt_60 + alldt_90) as alldt_90_all,
+         |    (amount_30 + amount_60 + amount_90) as amount_90_all,
          |    if(b.uid IS NULL, 0, 1) AS label
          |   FROM
          |     (SELECT *
@@ -40,50 +49,60 @@ object gbt_risk {
 
 
     val splits = df.randomSplit(Array(0.7, 0.3), seed = 11L)
+
+    //对训练集采样
     val training = sampleData(splits(0))
     println("train_pos:"+ training.where("label = 1.0").count())
     println("train_neg:"+ training.where("label = 0.0").count())
+
+    //测试集维持原始比例
     val test = splits(1)
     println("test_pos:"+ test.where("label = 1.0").count())
     println("test_neg:"+ test.where("label = 0.0").count())
 
     val num_features = Array(
-      "cnt_30","cnt_60","cnt_90",
-      "day_30","day_60","day_90",
-      "sid_30","sid_60","sid_90",
+      "hdid_cnt","sid_30","sid_60","sid_90",
       "sid_all_30","sid_all_60","sid_all_90",
-      "avg_sid_cnt_30","avg_sid_cnt_60","avg_sid_cnt_90",
-      "avg_sid_30","avg_sid_60","avg_sid_90","sub_cnt",
-      "cont_d_30","cont_d_60","cont_d_90","cont_all_30",
+      "apporderid_cnt","buyerid_cnt",
+      "sub_cnt","cont_d_30","cont_d_60","cont_d_90","cont_all_30",
       "cont_all_60","cont_all_90","avg_cont_30",
-      "avg_cont_60","avg_cont_90","gift_cnt_30",
-      "gift_cnt_60","gift_cnt_90","sum_30",
-      "sum_60","sum_90","stddev_30","stddev_60","stddev_90",
+      "avg_cont_60","avg_cont_90","gift_cnt_90_all",
+      "sum_90_all","stddev_30","stddev_60","stddev_90",
       "avg_30","avg_60","avg_90","dtcnt_30",
-      "dtcnt_60","dtcnt_90","alldt_30","alldt_60",
-      "alldt_90","amount_30","amount_60","amount_90",
+      "dtcnt_60","dtcnt_90",
+      "alldt_90_all","amount_90_all",
       "avg_amount_30","avg_amount_60","avg_amount_90",
       "stddev_amount_30","stddev_amount_60","stddev_amount_90",
-      "chid_30","chid_60","chid_90","paymethod_30","paymethod_60",
-      "paymethod_90","userip_30","userip_60",
-      "userip_90","max_cnt_30","max_cnt_60","max_cnt_90",
+      "chid_30","chid_60","chid_90","max_cnt_30","max_cnt_60","max_cnt_90",
       "avg_cnt_30","avg_cnt_60","avg_cnt_90",
-      "no_active_30","no_active_60","no_active_90",
-      "no_active_pay_30","no_active_pay_60","no_active_pay_90",
       "avg_amount", "stddev_amount", "max_cnt","avg_cnt","avg_delta_time",
-      "stddev_delta_time","avg_all_90","stddev_all_90","max_device_cnt",
-      "avg_device_cnt","stdev_device_cnt","max_IP_cnt","avg_IP_cnt","stdev_IP_cnt"
+      "stddev_delta_time","avg_all_90","stddev_all_90",
+      "max_IP_cnt","avg_IP_cnt","stdev_IP_cnt"
     )
 
     val stagesArray = new ListBuffer[PipelineStage]()
 
+    val formula =
+      s"""
+         |label ~ has_idnumber
+       """.stripMargin
+
+    val rformula = new RFormula()
+      .setFormula(formula)
+      .setFeaturesCol("catVec")
+      .setLabelCol("label")
+      .setHandleInvalid("skip")
+
+    stagesArray.append(rformula)
+
     tf_idf_stage(stagesArray, "events_list_90", 20)
-    tf_idf_stage(stagesArray, "events_list_60", 20)
-    tf_idf_stage(stagesArray, "events_list_30", 20)
+//    tf_idf_stage(stagesArray, "events_list_60", 20)
+//    tf_idf_stage(stagesArray, "events_list_30", 20)
     tf_idf_stage(stagesArray, "statuscode_list", 10)
+    tf_idf_stage(stagesArray, "appid_list", 10)
 
     val assembler = new VectorAssembler()
-      .setInputCols(Array("events_list_90_vec") ++ num_features)
+      .setInputCols(num_features ++ Array("catVec", "events_list_90_vec","statuscode_list_vec", "appid_list_vec"))
       .setOutputCol("assemble")
       .setHandleInvalid("skip")
     stagesArray.append(assembler)
@@ -100,23 +119,20 @@ object gbt_risk {
     val model = pipeline.fit(training)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/risk"
-    model.write.overwrite().save(output + "/piperisk_20210802")
+    model.write.overwrite().save(output + "/piperisk_20210803")
 
     val traindf = model.transform(training)
     traindf.select("label", "prediction")
       .createOrReplaceTempView("traindf")
     getIndicators(spark, "traindf")
 
-    val testdf = model.transform(test)
+    val testpred = model.transform(test)
+    val testdf = testpred.cache()
     testdf.select("label", "prediction")
       .createOrReplaceTempView("testdf")
     getIndicators(spark, "testdf")
 
     import spark.implicits._
-    val dataframe = testdf.select("label", "prediction", "probability").rdd.map(p => {
-      (p.getAs[Int](0), p.getAs[Double](1), p.getAs[DenseVector](2)(1))
-    }).toDF("label", "prediction", "probability")
-//    aucCal(dataframe)
 
     //调整阈值
     testdf.select("label", "prediction", "probability").rdd.map(p => {
@@ -124,14 +140,34 @@ object gbt_risk {
       val prediction = if (p.getAs[DenseVector](2)(1) >= 0.7) 1.0 else 0.0
       (label.toDouble, prediction)
     }).toDF("label", "prediction")
-      .createOrReplaceTempView("testDF2")
-    getIndicators(spark, "testDF2")
+      .createOrReplaceTempView("testDF_7")
+    getIndicators(spark, "testDF_7")
+
+    //调整阈值2
+    testdf.select("label", "prediction", "probability").rdd.map(p => {
+      val label = p.getAs[Int](0)
+      val prediction = if (p.getAs[DenseVector](2)(1) >= 0.8) 1.0 else 0.0
+      (label.toDouble, prediction)
+    }).toDF("label", "prediction")
+      .createOrReplaceTempView("testDF_8")
+    getIndicators(spark, "testDF_8")
+
+
+    //调整阈值3
+    testdf.select("label", "prediction", "probability").rdd.map(p => {
+      val label = p.getAs[Int](0)
+      val prediction = if (p.getAs[DenseVector](2)(1) >= 0.9) 1.0 else 0.0
+      (label.toDouble, prediction)
+    }).toDF("label", "prediction")
+      .createOrReplaceTempView("testDF_9")
+    getIndicators(spark, "testDF_9")
 
     val evaluator = new BinaryClassificationEvaluator()
     evaluator.setMetricName("areaUnderROC")
     val testAuc= evaluator.evaluate(testdf)
     println(" test auc:" + testAuc)
-    val gbtModel = model.stages(13).asInstanceOf[GBTClassificationModel]
+
+    val gbtModel = model.stages(11).asInstanceOf[GBTClassificationModel]
     println("importance:"+ gbtModel.featureImportances)
 
   }
@@ -153,7 +189,7 @@ object gbt_risk {
             ,FN
         from (
             select
-                count(1) as predict_cnt
+                count(*) as predict_cnt
                 ,count(if(label = 1.0 and prediction= 1.0, 1, null)) as TP
                 ,count(if(label = 0.0 and prediction= 1.0, 1, null)) as FP
                 ,count(if(label = 0.0 and prediction= 0.0, 1, null)) as TN
@@ -171,24 +207,10 @@ object gbt_risk {
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("pos_data", pos_data.count())
     println("neg_data", neg_data.count())
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 70))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 90))
     dataFrame
   }
 
-  def aucCal(df: DataFrame):Double= {
-    val sort: RDD[((Int, Double, Double), Long)] = df.rdd.map(p => {
-      (p.getAs[Int](0), p.getAs[Double](1), p.getAs[Double](2))
-    }).sortBy(_._3, ascending = true).zipWithIndex()
-    //计算正样本的ranker之和
-    val posSum = sort.filter(_._1._1 == 1).map(_._2).sum()
-    //计算正样本数量M和负样本数量N
-    val M = sort.filter(_._1._1 == 1).count
-    val N = sort.filter(_._1._1 == 0).count
-    //计算公式
-    val auc = (posSum - ((M - 1.0) * M) / 2) / (M * N)
-    println("aucCal:" + auc)
-    auc
-  }
 
   def tf_idf_stage(stagesArray:ListBuffer[PipelineStage], input: String, numFeatures: Int): Unit ={
     val tokenizer = new RegexTokenizer()
