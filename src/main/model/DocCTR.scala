@@ -53,7 +53,7 @@ object DocCTR {
     val indexArray = new ListBuffer[String]()
     val vecArray = new ListBuffer[String]()
     for(cate <- category_col){
-      val indexer = new StringIndexer().setInputCol(cate).setOutputCol(s"${cate}Index")
+      val indexer = new StringIndexer().setInputCol(cate).setOutputCol(s"${cate}Index").setHandleInvalid("keep")
       indexArray.append(s"${cate}Index")
       vecArray.append(s"${cate}Vec")
       stagesArray.append(indexer)
