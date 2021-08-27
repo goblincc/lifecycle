@@ -7,6 +7,8 @@ import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.rdd.RDD
+
+
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
@@ -25,14 +27,6 @@ object gbt_risk {
       s"""
          |SELECT a.*,
          |    cast(is_nick_modify as string) as is_nick_modifys,
-         |    (cnt_30 + cnt_60 + cnt_90) as cnt_90_all,
-         |    (day_30 + day_60 + day_90) as day_90_all,
-         |    (sid_30 + sid_60 + sid_90) as sid_90_all,
-         |    (sid_all_30 + sid_all_60 + sid_all_90) as sid_all_90_dr,
-         |    (gift_cnt_30 + gift_cnt_60 + gift_cnt_90) as gift_cnt_90_all,
-         |    (sum_30 + sum_60 + sum_90) as sum_90_all,
-         |    (alldt_30 + alldt_60 + alldt_90) as alldt_90_all,
-         |    (amount_30 + amount_60 + amount_90) as amount_90_all,
          |    nvl(alldt_30/dtcnt_30,0) AS avg_pay_times_30,
          |    nvl(alldt_60/dtcnt_60,0) AS avg_pay_times_60,
          |    nvl(alldt_90/dtcnt_90,0) AS avg_pay_times_90,
@@ -51,12 +45,10 @@ object gbt_risk {
          |  ) AS a
          |   LEFT JOIN
          |     (SELECT uid
-         |      FROM persona.yylive_risk_rule_day_all
-         |      WHERE dt = '2021-08-15'
-         |      UNION SELECT uid
          |      FROM persona.yylive_ods_blacklist_d
-         |      WHERE dt='20210815') AS b ON a.uid = b.uid
-       """.stripMargin)
+         |      WHERE dt='20210815' and trim(reason) != '触发规则进黑名单') AS b ON a.uid = b.uid
+       """.stripMargin
+    )
 
 
     val splits = df.randomSplit(Array(0.7, 0.3), seed = 11L)
@@ -77,16 +69,12 @@ object gbt_risk {
       "apporderid_cnt","buyerid_cnt",
       "sub_cnt","cont_d_30","cont_d_60","cont_d_90","cont_all_30",
       "cont_all_60","cont_all_90","avg_cont_30",
-      "avg_cont_60","avg_cont_90","gift_cnt_90_all",
-      "sum_90_all","stddev_30","stddev_60","stddev_90",
-      "avg_30","avg_60","avg_90","dtcnt_30",
-      "dtcnt_60","dtcnt_90",
-      "alldt_90_all","amount_90_all",
-      "avg_amount_30","avg_amount_60","avg_amount_90",
-      "stddev_amount_30","stddev_amount_60","stddev_amount_90",
+      "avg_cont_60","avg_cont_90",
+      "stddev_30","stddev_60","stddev_90",
+      "avg_30","avg_60","avg_90","dtcnt_90", "alldt_90","avg_amount_90","amount_90",
       "chid_30","chid_60","chid_90","max_cnt_30","max_cnt_60","max_cnt_90",
       "avg_cnt_30","avg_cnt_60","avg_cnt_90",
-      "avg_amount", "stddev_amount", "max_cnt","avg_cnt","avg_delta_time",
+      "stddev_amount", "max_cnt","avg_cnt","avg_delta_time",
       "stddev_delta_time","avg_all_90","stddev_all_90",
       "max_IP_cnt","avg_IP_cnt","stdev_IP_cnt",
       "avg_pay_times_30", "avg_pay_times_60", "avg_pay_times_90",
@@ -134,7 +122,7 @@ object gbt_risk {
     val model = pipeline.fit(training)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/risk"
-    model.write.overwrite().save(output + "/piperisk_20210804")
+    model.write.overwrite().save(output + "/piperisk_20210814")
 
     val traindf = model.transform(training)
     traindf.select("label", "prediction")

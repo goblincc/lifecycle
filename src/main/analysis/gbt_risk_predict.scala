@@ -24,14 +24,17 @@ object gbt_risk_predict {
     val sqlTxt =
       s"""
          |SELECT *,
-         |    (cnt_30 + cnt_60 + cnt_90) as cnt_90_all,
-         |    (day_30 + day_60 + day_90) as day_90_all,
-         |    (sid_30 + sid_60 + sid_90) as sid_90_all,
-         |    (sid_all_30 + sid_all_60 + sid_all_90) as sid_all_90_dr,
-         |    (gift_cnt_30 + gift_cnt_60 + gift_cnt_90) as gift_cnt_90_all,
-         |    (sum_30 + sum_60 + sum_90) as sum_90_all,
-         |    (alldt_30 + alldt_60 + alldt_90) as alldt_90_all,
-         |    (amount_30 + amount_60 + amount_90) as amount_90_all
+         |    cast(is_nick_modify as string) as is_nick_modifys,
+         |    nvl(alldt_30/dtcnt_30,0) AS avg_pay_times_30,
+         |    nvl(alldt_60/dtcnt_60,0) AS avg_pay_times_60,
+         |    nvl(alldt_90/dtcnt_90,0) AS avg_pay_times_90,
+         |    nvl(chid_30/alldt_30,0) AS avg_chid_times_30,
+         |    nvl(chid_60/alldt_60,0) AS avg_chid_times_60,
+         |    nvl(chid_90/alldt_90,0) AS avg_chid_times_90,
+         |    nvl(paymethod_30/alldt_30,0) AS avg_method_times_30,
+         |    nvl(paymethod_60/alldt_60,0) AS avg_method_times_60,
+         |    nvl(paymethod_90/alldt_90,0) AS avg_method_times_90,
+         |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio
          |FROM persona.yylive_uid_feature_info
          |WHERE dt='${dt}'
        """.stripMargin
@@ -39,7 +42,7 @@ object gbt_risk_predict {
     val data = spark.sql(sqlTxt)
 //    val model_dt = TimeUtils.addDate(dts, -2)
 //    println("model_dt:" + model_dt)
-    val model = PipelineModel.read.load( modelPath + "/piperisk_20210803")
+    val model = PipelineModel.read.load( modelPath + "/piperisk_20210814")
     val predict = model.transform(data)
     saveData2hive(spark, dt, predict)
   }
