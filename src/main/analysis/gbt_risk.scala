@@ -25,28 +25,13 @@ object gbt_risk {
 
     val df = spark.sql(
       s"""
-         |SELECT a.*,
-         |    cast(is_nick_modify as string) as is_nick_modifys,
-         |    nvl(alldt_30/dtcnt_30,0) AS avg_pay_times_30,
-         |    nvl(alldt_60/dtcnt_60,0) AS avg_pay_times_60,
-         |    nvl(alldt_90/dtcnt_90,0) AS avg_pay_times_90,
-         |    nvl(chid_30/alldt_30,0) AS avg_chid_times_30,
-         |    nvl(chid_60/alldt_60,0) AS avg_chid_times_60,
+         |SELECT *,
          |    nvl(chid_90/alldt_90,0) AS avg_chid_times_90,
-         |    nvl(paymethod_30/alldt_30,0) AS avg_method_times_30,
-         |    nvl(paymethod_60/alldt_60,0) AS avg_method_times_60,
          |    nvl(paymethod_90/alldt_90,0) AS avg_method_times_90,
-         |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio,
-         |    if(b.uid IS NULL, 0, 1) AS label
+         |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio
          |   FROM
-         |     (SELECT *
-         |      FROM persona.yylive_uid_feature_info
-         |      WHERE dt='2021-08-15'
-         |  ) AS a
-         |   LEFT JOIN
-         |     (SELECT uid
-         |      FROM persona.yylive_ods_blacklist_d
-         |      WHERE dt='20210815' and trim(reason) != '触发规则进黑名单') AS b ON a.uid = b.uid
+         |	persona.yylive_uid_feature_info_label
+         |   WHERE dt='2021-08-27'
        """.stripMargin
     )
 
@@ -64,23 +49,20 @@ object gbt_risk {
     println("test_neg:"+ test.where("label = 0.0").count())
 
     val num_features = Array(
-      "hdid_cnt","sid_30","sid_60","sid_90",
-      "sid_all_30","sid_all_60","sid_all_90",
-      "apporderid_cnt","buyerid_cnt",
-      "sub_cnt","cont_d_30","cont_d_60","cont_d_90","cont_all_30",
-      "cont_all_60","cont_all_90","avg_cont_30",
-      "avg_cont_60","avg_cont_90",
-      "stddev_30","stddev_60","stddev_90",
-      "avg_30","avg_60","avg_90","dtcnt_90", "alldt_90","avg_amount_90","amount_90",
-      "chid_30","chid_60","chid_90","max_cnt_30","max_cnt_60","max_cnt_90",
-      "avg_cnt_30","avg_cnt_60","avg_cnt_90",
-      "stddev_amount", "max_cnt","avg_cnt","avg_delta_time",
-      "stddev_delta_time","avg_all_90","stddev_all_90",
-      "max_IP_cnt","avg_IP_cnt","stdev_IP_cnt",
-      "avg_pay_times_30", "avg_pay_times_60", "avg_pay_times_90",
-      "avg_chid_times_30", "avg_chid_times_60", "avg_chid_times_90",
-      "avg_method_times_30", "avg_method_times_60", "avg_method_times_90",
-      "buyer_pay_ratio"
+      "avg_chid_times_90", "avg_method_times_90","buyer_pay_ratio",
+      "cnt_90", "day_90", "sid_90" ,
+      "sid_all_90", "avg_sid_cnt_90", "avg_sid_90",
+      "sub_cnt", "cont_d_90", "cont_all_90", "avg_cont_90",
+      "gift_cnt_90", "sum_90", "stddev_90", "avg_90",
+      "alldt_90", "amount_90", "avg_amount_90",
+      "stddev_amount_90", "chid_90", "paymethod_90",
+      "userip_90", "max_cnt_90", "avg_cnt_90", "no_active_90",
+      "no_active_pay_90",  "max_cnt", "avg_cnt",
+      "avg_delta_time", "avg_all_90",
+      "stddev_all_90", "max_device_cnt", "avg_device_cnt",
+      "stdev_device_cnt", "max_ip_cnt", "avg_ip_cnt",
+      "stdev_ip_cnt", "appid_cnt", "buyerid_cnt",
+      "hdid_cnt", "apporderid_cnt", "reg_day"
     )
 
     val stagesArray = new ListBuffer[PipelineStage]()
@@ -105,7 +87,7 @@ object gbt_risk {
     tf_idf_stage(stagesArray, "appid_list", 10)
 
     val assembler = new VectorAssembler()
-      .setInputCols(num_features ++ Array("catVec", "events_list_90_vec","statuscode_list_vec", "appid_list_vec"))
+      .setInputCols(num_features ++ Array("catVec","events_list_90_vec","statuscode_list_vec", "appid_list_vec"))
       .setOutputCol("assemble")
       .setHandleInvalid("skip")
     stagesArray.append(assembler)
@@ -122,7 +104,7 @@ object gbt_risk {
     val model = pipeline.fit(training)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/risk"
-    model.write.overwrite().save(output + "/piperisk_20210814")
+    model.write.overwrite().save(output + "/piperisk_20210827")
 
     val traindf = model.transform(training)
     traindf.select("label", "prediction")
@@ -170,8 +152,8 @@ object gbt_risk {
     val testAuc= evaluator.evaluate(testdf)
     println(" test auc:" + testAuc)
 
-    val gbtModel = model.stages(11).asInstanceOf[GBTClassificationModel]
-    println("importance:"+ gbtModel.featureImportances)
+//    val gbtModel = model.stages(11).asInstanceOf[GBTClassificationModel]
+//    println("importance:"+ gbtModel.featureImportances)
 
   }
 
