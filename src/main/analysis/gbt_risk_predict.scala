@@ -25,14 +25,11 @@ object gbt_risk_predict {
       s"""
          |SELECT *,
          |    cast(is_nick_modify as string) as is_nick_modifys,
-         |    nvl(alldt_30/dtcnt_30,0) AS avg_pay_times_30,
-         |    nvl(alldt_60/dtcnt_60,0) AS avg_pay_times_60,
-         |    nvl(alldt_90/dtcnt_90,0) AS avg_pay_times_90,
-         |    nvl(chid_30/alldt_30,0) AS avg_chid_times_30,
-         |    nvl(chid_60/alldt_60,0) AS avg_chid_times_60,
+         |    datediff('${dt}',regtime) AS reg_day,
+         |    max_IP_cnt as max_ip_cnts,
+         |    avg_IP_cnt as avg_ip_cnts,
+         |    stdev_IP_cnt as stdev_ip_cnts,
          |    nvl(chid_90/alldt_90,0) AS avg_chid_times_90,
-         |    nvl(paymethod_30/alldt_30,0) AS avg_method_times_30,
-         |    nvl(paymethod_60/alldt_60,0) AS avg_method_times_60,
          |    nvl(paymethod_90/alldt_90,0) AS avg_method_times_90,
          |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio
          |FROM persona.yylive_uid_feature_info
@@ -42,7 +39,8 @@ object gbt_risk_predict {
     val data = spark.sql(sqlTxt)
 //    val model_dt = TimeUtils.addDate(dts, -2)
 //    println("model_dt:" + model_dt)
-    val model = PipelineModel.read.load( modelPath + "/piperisk_20210814")
+//    piperisk_20210814
+    val model = PipelineModel.read.load( modelPath + "/piperisk_20210827")
     val predict = model.transform(data)
     saveData2hive(spark, dt, predict)
   }

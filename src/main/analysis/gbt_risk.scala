@@ -26,6 +26,9 @@ object gbt_risk {
     val df = spark.sql(
       s"""
          |SELECT *,
+         |    max_ip_cnt as max_ip_cnts,
+         |    avg_ip_cnt as avg_ip_cnts,
+         |    stdev_ip_cnt as stdev_ip_cnts,
          |    nvl(chid_90/alldt_90,0) AS avg_chid_times_90,
          |    nvl(paymethod_90/alldt_90,0) AS avg_method_times_90,
          |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio
@@ -60,8 +63,8 @@ object gbt_risk {
       "no_active_pay_90",  "max_cnt", "avg_cnt",
       "avg_delta_time", "avg_all_90",
       "stddev_all_90", "max_device_cnt", "avg_device_cnt",
-      "stdev_device_cnt", "max_ip_cnt", "avg_ip_cnt",
-      "stdev_ip_cnt", "appid_cnt", "buyerid_cnt",
+      "stdev_device_cnt", "max_ip_cnts", "avg_ip_cnts",
+      "stdev_ip_cnts", "appid_cnt", "buyerid_cnt",
       "hdid_cnt", "apporderid_cnt", "reg_day"
     )
 
@@ -80,14 +83,14 @@ object gbt_risk {
 
     stagesArray.append(rformula)
 
-    tf_idf_stage(stagesArray, "events_list_90", 20)
+//    tf_idf_stage(stagesArray, "events_list_90", 20)
 //    tf_idf_stage(stagesArray, "events_list_60", 20)
 //    tf_idf_stage(stagesArray, "events_list_30", 20)
     tf_idf_stage(stagesArray, "statuscode_list", 10)
     tf_idf_stage(stagesArray, "appid_list", 10)
 
     val assembler = new VectorAssembler()
-      .setInputCols(num_features ++ Array("catVec","events_list_90_vec","statuscode_list_vec", "appid_list_vec"))
+      .setInputCols(num_features ++ Array("catVec","statuscode_list_vec", "appid_list_vec"))
       .setOutputCol("assemble")
       .setHandleInvalid("skip")
     stagesArray.append(assembler)
@@ -192,7 +195,7 @@ object gbt_risk {
     val ratio = pos_data.count() * 1.0/neg_data.count()
     println("pos_data", pos_data.count())
     println("neg_data", neg_data.count())
-    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 90))
+    val dataFrame = pos_data.union(neg_data.sample(false, ratio * 120))
     dataFrame
   }
 
