@@ -32,12 +32,19 @@ object GraphxDemo2 {
       (2,0)
      */
 //    是一个tuple类型，key分别为所有的顶点id，value为key所在的连通体id(连通体中顶点id最小值)
-    vertices.foreach(println(_))
+    /*vertices.foreach(println(_))
     users.join(vertices).map{
       case(id,(username,value))=>(value,username)
     }.groupByKey().map(t=>{
       t._1+"->"+t._2.mkString(",")
-    }).foreach(println(_))
+    }).foreach(println(_))*/
+    /*import spark.implicits._
+    vertices.toDF("id1", "id2").show(5,false)
+    users.join(vertices).map(p=>{
+      (p._2._2, p._2._1)
+    }).foreach(println(_))*/
 
+    vertices.foreach(println(_))
   }
+
 }
