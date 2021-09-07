@@ -7,9 +7,11 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
+import utils.TimeUtils
 
 object GraphConnect {
   def main(args: Array[String]): Unit = {
+    val dt = TimeUtils.changFormat(args(0))
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport()
@@ -20,13 +22,13 @@ object GraphConnect {
     val sc = spark.sparkContext
     val sqlTxt =
       s"""
-         |select uid as vertices, "uid" as types from persona.yylive_uid_mobile_info where dt = '2021-09-01'
+         |select uid as vertices, "uid" as types from persona.yylive_uid_mobile_info where dt = '${dt}'
          |union
-         |select mobile as vertices, "mobile" as types from persona.yylive_uid_mobile_info where dt = '2021-09-01'
+         |select mobile as vertices, "mobile" as types from persona.yylive_uid_mobile_info where dt = '${dt}'
          |union
-         |select uid as vertices, "uid" as types from persona.yylive_uid_idnum_info where dt = '2021-09-01'
+         |select uid as vertices, "uid" as types from persona.yylive_uid_idnum_info where dt = '${dt}'
          |union
-         |select idnum as vertices, "idnum" as types from persona.yylive_uid_idnum_info where dt = '2021-09-01'
+         |select idnum as vertices, "idnum" as types from persona.yylive_uid_idnum_info where dt = '${dt}'
        """.stripMargin
 
     val verticesDataFrame = spark.sql(sqlTxt).persist(StorageLevel.MEMORY_AND_DISK)
@@ -46,9 +48,9 @@ object GraphConnect {
 
     val sqlTxt2 =
       s"""
-         |select mobile, uid, "mobile_conn" as conn from persona.yylive_uid_mobile_info where dt = '2021-09-01'
+         |select mobile, uid, "mobile_conn" as conn from persona.yylive_uid_mobile_info where dt = '${dt}'
          |union
-         |select idnum, uid, "idnum_conn" as conn from persona.yylive_uid_idnum_info where dt = '2021-09-01'
+         |select idnum, uid, "idnum_conn" as conn from persona.yylive_uid_idnum_info where dt = '${dt}'
        """.stripMargin
 
     spark.sql(sqlTxt2).toDF("src", "dst", "conn").createOrReplaceTempView("table_edge")
@@ -75,7 +77,7 @@ object GraphConnect {
 
     val result = spark.sql(
       s"""
-         |insert overwrite table persona.yylive_uid_risk_groups partition(dt='2021-09-01')
+         |insert overwrite table persona.yylive_uid_risk_groups partition(dt='${dt}')
          |SELECT b.vertices,
          |       types,
          |       categoryid

@@ -7,16 +7,16 @@ import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.rdd.RDD
-
-
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, SparkSession}
+import utils.TimeUtils
 
 import scala.collection.mutable.ListBuffer
 
 object gbt_risk {
   def main(args: Array[String]): Unit = {
-
+    val dts = args(0)
+    val dt = TimeUtils.changFormat(dts)
     val spark = SparkSession.builder()
       .config("spark.hadoop.validateOutputSpecs", value = false)
       .enableHiveSupport()
@@ -34,7 +34,7 @@ object gbt_risk {
          |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio
          |   FROM
          |	persona.yylive_uid_feature_info_label
-         |   WHERE dt='2021-08-27'
+         |   WHERE dt='${dt}'
        """.stripMargin
     )
 
@@ -107,7 +107,7 @@ object gbt_risk {
     val model = pipeline.fit(training)
 
     val output = "hdfs://yycluster02/hive_warehouse/persona_client.db/chenchang/risk"
-    model.write.overwrite().save(output + "/piperisk_20210827")
+    model.write.overwrite().save(output + s"/piperisk_${dts}")
 
     val traindf = model.transform(training)
     traindf.select("label", "prediction")

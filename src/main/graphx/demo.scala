@@ -14,7 +14,12 @@ object demo {
     val rdd3 = sc.makeRDD(Array(("Spark","1"),("Hadoop","2"),("Scala","3"),("Java","4")),2)
     val rdd2 = sc.makeRDD(Array(("1","30K"),("2","15K"),("3","25K"),("5","10K")),2)
 
-    rdd1.join(rdd2).collect.foreach(println)
-    rdd1.join(rdd3).collect.foreach(println)
+//    rdd1.join(rdd2).collect.foreach(println)
+//    rdd1.join(rdd3).collect.foreach(println)
+    val map1 = Map(2 -> 3, 0 -> 2, 5 -> 2)
+    val map2 = Map(0 -> 3, 2 -> 2, 6 -> 2)
+    print(map1.keySet--map2.keySet)
+
   }
+
 }

@@ -16,7 +16,7 @@ object GraphxDemo2 {
     val relationships: RDD[Edge[String]] =
       sc.parallelize(Array(Edge(3L, 7L, "collab"),    Edge(5L, 3L, "advisor"),
         Edge(2L, 5L, "colleague"), Edge(5L, 7L, "pi"),
-        Edge(4L, 10L, "student"),   Edge(5L, 0L, "colleague")))
+        Edge(4L, 10L, "student"),   Edge(5L, 0L, "colleague"), Edge(0L, 2L, "colleague")))
     // Define a default user in case there are relationship with missing user
 //    val defaultUser = ("John Doe", "Missing")
 
@@ -37,14 +37,15 @@ object GraphxDemo2 {
       case(id,(username,value))=>(value,username)
     }.groupByKey().map(t=>{
       t._1+"->"+t._2.mkString(",")
-    }).foreach(println(_))*/
-    /*import spark.implicits._
+    }).foreach(println(_))
+    import spark.implicits._
     vertices.toDF("id1", "id2").show(5,false)
     users.join(vertices).map(p=>{
       (p._2._2, p._2._1)
     }).foreach(println(_))*/
 
-    vertices.foreach(println(_))
+    val triCounts = graph.triangleCount().vertices
+    triCounts.foreach(println(_))
   }
 
 }
