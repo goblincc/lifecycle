@@ -65,7 +65,7 @@ object gbt_risk {
       "stddev_all_90", "max_device_cnt", "avg_device_cnt",
       "stdev_device_cnt", "max_ip_cnts", "avg_ip_cnts",
       "stdev_ip_cnts", "appid_cnt", "buyerid_cnt",
-      "hdid_cnt", "apporderid_cnt", "reg_day"
+      "hdid_cnt", "apporderid_cnt", "reg_day", "fail_rate"
     )
 
     val stagesArray = new ListBuffer[PipelineStage]()
