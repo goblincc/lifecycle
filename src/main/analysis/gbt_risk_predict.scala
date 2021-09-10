@@ -40,7 +40,7 @@ object gbt_risk_predict {
 //    val model_dt = TimeUtils.addDate(dts, -2)
 //    println("model_dt:" + model_dt)
 //    piperisk_20210814
-    val model = PipelineModel.read.load( modelPath + "/piperisk_20210827")
+    val model = PipelineModel.read.load( modelPath + "/piperisk_20210909")
     val predict = model.transform(data)
     saveData2hive(spark, dt, predict)
   }
