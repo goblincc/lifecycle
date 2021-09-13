@@ -1,6 +1,7 @@
 package analysis
 
 import analysis.gbtTrain_active.tf_idf
+import analysis.gbt_risk_predict.saveData2hive
 import org.apache.spark.ml.classification.{GBTClassificationModel, GBTClassifier}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature._
@@ -8,7 +9,8 @@ import org.apache.spark.ml.linalg.DenseVector
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.storage.StorageLevel
 import utils.TimeUtils
 
 import scala.collection.mutable.ListBuffer
@@ -34,10 +36,9 @@ object gbt_risk {
          |    nvl(buyerid_cnt/alldt_90,0) AS buyer_pay_ratio
          |   FROM
          |	persona.yylive_uid_feature_info_label
-         |   WHERE dt='${dt}'
+         |   WHERE dt='${dt}' and cast(uid as bigint) > 0
        """.stripMargin
-    )
-
+    ).persist(StorageLevel.MEMORY_AND_DISK)
 
     val splits = df.randomSplit(Array(0.7, 0.3), seed = 11L)
 
@@ -158,6 +159,9 @@ object gbt_risk {
 //    val gbtModel = model.stages(11).asInstanceOf[GBTClassificationModel]
 //    println("importance:"+ gbtModel.featureImportances)
 
+    val predict = model.transform(df)
+    saveData2hive(spark, dt, predict)
+
   }
 
   def getIndicators(sparkSession: SparkSession, table: String): Unit ={
@@ -214,5 +218,28 @@ object gbt_risk {
     val idf = new IDF().setInputCol(input + "_tf").setOutputCol(input + "_vec")
     stagesArray.append(idf)
 
+  }
+
+  def saveData2hive(spark:SparkSession, dt: String, dataFrame: DataFrame): Unit ={
+    val structFields = Array(
+      StructField("uid",StringType,true),
+      StructField("prediction",DoubleType,true),
+      StructField("probability",DoubleType,true)
+    )
+    val structType = DataTypes.createStructType(structFields)
+    val row: RDD[Row] = dataFrame.select("uid", "prediction", "probability").rdd.map(p => {
+      val uid = p.getString(0)
+      val prediction = p.getDouble(1)
+      val probability = p.getAs[DenseVector](2)(1)
+      Row(uid, prediction, probability)
+    })
+
+    spark.createDataFrame(row,structType).createOrReplaceTempView("tb_save")
+
+    spark.sql(
+      s"""
+         |insert overwrite table persona.yylive_uid_feature_train_predict partition(dt='${dt}')
+         |	select * from tb_save
+       """.stripMargin)
   }
 }
